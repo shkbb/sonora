@@ -104,10 +104,13 @@ pub fn claim(
 /// changes.
 pub fn connect(streams: bool) -> io::Result<Stream> {
     let stream = Stream::connect(name()?)?;
-    stream.set_recv_timeout(match streams {
+    // Windows named pipes take no timeout, so there the command waits for its answer.
+    if let Err(error) = stream.set_recv_timeout(match streams {
         true => None,
         false => Some(ANSWER),
-    })?;
+    }) {
+        log::debug!("single: cannot bound the answer: {error:#}");
+    }
     Ok(stream)
 }
 
