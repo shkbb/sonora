@@ -1,5 +1,6 @@
 //! The Video tab of the right sidebar: the music video playing, at the width of the panel,
-//! beside the rest of the app, with a way into the fullscreen player to watch it large.
+//! beside the rest of the app, with a way into the fullscreen player to watch it large. Under
+//! it the lyrics or the queue, switched in their own header.
 //! `state::Video` downloads and decodes it only while this tab or the fullscreen player shows.
 
 use gpui::accesskit::Role;
@@ -7,27 +8,32 @@ use gpui::prelude::*;
 use gpui::{Context, Entity, ObjectFit, Render, SharedString, Window, div, img};
 use i18n::t;
 use input::ToggleFullscreen;
-use state::{Playback, Sonora, Video, Viewer};
+use state::{Playback, Queue, SideTab, Sonora, Video, Viewer};
 use ui::{ActiveTheme as _, Button, Text, eyebrow, snapped, vacant};
 
+use crate::chrome::Aside;
 use crate::shared::picture::{self, Picture};
 
 pub(crate) struct VideoPanel {
     video: Entity<Video>,
     playback: Entity<Playback>,
     picture: Picture,
+    /// The lyrics or the queue under the video.
+    aside: Entity<Aside>,
 }
 
 impl VideoPanel {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(queue: Entity<Queue>, playback: Entity<Playback>, cx: &mut Context<Self>) -> Self {
         let video = Sonora::global(cx).video.clone();
-        let playback = Sonora::global(cx).playback.clone();
+        let aside = cx.new(|cx| Aside::new(queue, playback.clone(), SideTab::Lyrics, cx));
+        aside.update(cx, |aside, _| aside.tabbed());
         cx.observe(&video, |_, _, cx| cx.notify()).detach();
         cx.observe(&playback, |_, _, cx| cx.notify()).detach();
         Self {
             video,
             playback,
             picture: Picture::default(),
+            aside,
         }
     }
 
@@ -116,6 +122,7 @@ impl Render for VideoPanel {
             div()
                 .flex()
                 .flex_col()
+                .flex_none()
                 .gap_3()
                 .p_2()
                 .min_w_0()
@@ -141,5 +148,6 @@ impl Render for VideoPanel {
                         ),
                 ),
         )
+        .child(div().flex_1().min_h_0().child(self.aside.clone()))
     }
 }

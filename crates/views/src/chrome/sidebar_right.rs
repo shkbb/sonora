@@ -39,9 +39,9 @@ impl SidebarRight {
             SideTab::Members | SideTab::Video => SideTab::Queue,
             tab => tab,
         };
+        let video = cx.new(|cx| VideoPanel::new(queue.clone(), playback.clone(), cx));
         let aside = cx.new(|cx| Aside::new(queue, playback, shown, cx));
         let members = cx.new(Members::new);
-        let video = cx.new(VideoPanel::new);
         video.update(cx, |video, cx| {
             video.set_shown(open && tab == SideTab::Video, cx)
         });
