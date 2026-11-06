@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context as _, Result};
 use async_trait::async_trait;
@@ -8,11 +9,12 @@ use tokio::task::JoinSet;
 use ytmusic::YtMusic;
 
 use crate::cover::{self, CoverLimits};
+use crate::youtube::stats::Stats;
 use crate::youtube::{genres, radio, subscriptions, wire};
 use crate::{
     Album, AlbumCatalogue, AlbumDetail, Artist, ArtistCatalogue, ArtistProfile, Feed, Genre,
-    GenreDetail, HomeFeed, MediaKind, MusicApi, Playlist, PlaylistDetail, SUGGESTIONS, SavedArtist,
-    Track, UserProfile, escape,
+    GenreDetail, HomeFeed, MediaKind, MusicApi, Playlist, PlaylistDetail, Report, SUGGESTIONS,
+    SavedArtist, Track, UserProfile, escape,
 };
 
 const PORTRAIT_LIMIT: usize = 24;
@@ -29,6 +31,8 @@ const EPISODES: &str = "SE";
 pub struct YouTubeClient {
     api: Arc<YtMusic>,
     account: String,
+    /// What reports the plays to YouTube, `None` for a guest, whose plays belong to nobody.
+    stats: Option<Arc<Stats>>,
 }
 
 impl YouTubeClient {
@@ -36,7 +40,15 @@ impl YouTubeClient {
         Self {
             api,
             account: String::new(),
+            stats: None,
         }
+    }
+
+    /// Reports every play to YouTube the way the YouTube Music page does, so it shows in the
+    /// account's history and counts as watch time. Only a signed-in session has plays to report.
+    pub fn reporting(mut self) -> Self {
+        self.stats = Some(Stats::new(self.api.clone()));
+        self
     }
 
     pub fn owned_by(mut self, account: impl Into<String>) -> Self {
@@ -246,6 +258,13 @@ impl MusicApi for YouTubeClient {
 
     async fn track_playcount(&self, _track_id: &str) -> Result<Option<u64>> {
         Ok(None)
+    }
+
+    async fn report(&self, track_id: &str, report: Report, position: Duration) -> Result<()> {
+        if let Some(stats) = &self.stats {
+            stats.report(track_id, report, position).await;
+        }
+        Ok(())
     }
 
     async fn playlists(&self) -> Result<Vec<Playlist>> {

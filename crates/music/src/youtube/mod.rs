@@ -7,6 +7,7 @@ mod lyrics;
 mod playback;
 mod radio;
 mod segments;
+mod stats;
 mod subscriptions;
 mod wire;
 
@@ -147,7 +148,9 @@ impl YouTubeProvider {
     fn authenticated_session(&self, api: Arc<YtMusic>, profile: UserProfile) -> ProviderSession {
         let since = self.rotated_at().unwrap_or_else(SystemTime::now);
         keep_fresh(Arc::downgrade(&api), since);
-        let client = YouTubeClient::new(api.clone()).owned_by(profile.display_name.clone());
+        let client = YouTubeClient::new(api.clone())
+            .owned_by(profile.display_name.clone())
+            .reporting();
         ProviderSession {
             profile,
             api: Arc::new(client),

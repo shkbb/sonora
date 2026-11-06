@@ -16,6 +16,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   each track's own sample rate on Linux and macOS.
 - Swipe two fingers sideways on a touchpad to go back or forward a page.
 - A quick flick on a touchpad under Wayland keeps the page scrolling for a moment after your fingers lift.
+- Songs you play from YouTube Music while signed in are reported to YouTube the way its own
+  apps report them, so they show up in your YouTube Music history.
 
 ### Changed
 
