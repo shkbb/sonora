@@ -35,6 +35,7 @@ pub mod tidal;
 mod trim;
 pub mod trouble;
 pub mod vault;
+pub mod video;
 pub mod youtube;
 
 use std::collections::{HashMap, HashSet};
@@ -208,6 +209,12 @@ pub trait MusicApi: Send + Sync {
     /// listening record keeps the default and makes no request.
     async fn played(&self, _track_id: &str, _at: SystemTime) -> Result<()> {
         Ok(())
+    }
+
+    /// The picture of a track that is a music video, already arriving. `None` for a track with
+    /// no picture of its own, which is every track of a provider that has no videos.
+    async fn open_video(&self, _track_id: &str) -> Result<Option<video::VideoStream>> {
+        Ok(None)
     }
 
     /// Tells the provider a track has started playing, so the play counts on the provider's

@@ -41,6 +41,7 @@ mod toast;
 mod updates;
 mod usage;
 mod vault;
+mod video;
 mod wake;
 mod window_shape;
 
@@ -94,6 +95,7 @@ pub use toast::{Outcome, Target, Toast, ToastAction, Toasts};
 pub use updates::{Channel, Release, UpdateState, Updates, VERSION, updates_itself};
 pub use usage::Usage;
 pub use vault::CACHE_GB_RANGE;
+pub use video::Video;
 pub use wake::Wake;
 pub use window_shape::{apply_window_rounding, install_rounded_window_hook};
 
@@ -244,6 +246,8 @@ pub struct Sonora {
     pub signal: Entity<Signal>,
     pub updates: Entity<Updates>,
     pub usage: Entity<Usage>,
+    /// The picture of the music video playing, decoded only while a view shows it.
+    pub video: Entity<Video>,
     pub wake: Entity<Wake>,
 }
 
@@ -343,6 +347,7 @@ pub fn init(
             cx,
         )
     });
+    let video = cx.new(|cx| Video::new(playback.clone(), session.clone(), io.clone(), cx));
     let lyrics = cx.new(|cx| {
         Lyrics::new(
             playback.clone(),
@@ -430,6 +435,7 @@ pub fn init(
         signal,
         updates,
         usage,
+        video,
         wake,
     });
 }

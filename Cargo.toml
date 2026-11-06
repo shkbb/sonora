@@ -21,6 +21,7 @@ input = { path = "crates/input" }
 router = { path = "crates/router" }
 ui = { path = "crates/ui" }
 views = { path = "crates/views" }
+video = { path = "crates/video" }
 webview = { path = "crates/webview" }
 widevine = { path = "crates/widevine" }
 
@@ -249,4 +250,8 @@ opt-level = 3
 opt-level = 3
 
 [profile.dev.package.rusty_aac]
+opt-level = 3
+
+# A music video's frames are converted to BGRA pixel by pixel, 25 or more times a second.
+[profile.dev.package.video]
 opt-level = 3

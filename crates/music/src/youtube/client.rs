@@ -9,6 +9,7 @@ use tokio::task::JoinSet;
 use ytmusic::YtMusic;
 
 use crate::cover::{self, CoverLimits};
+use crate::video::{VideoBody, VideoStream};
 use crate::youtube::stats::Stats;
 use crate::youtube::{genres, radio, subscriptions, wire};
 use crate::{
@@ -27,6 +28,19 @@ const COVER_LIMITS: CoverLimits = CoverLimits {
     bytes: 1024 * 1024,
 };
 const EPISODES: &str = "SE";
+/// The tallest picture a music video is fetched at. Taller ones cost download and decoding
+/// for detail the player rarely has room to show.
+const VIDEO_HEIGHT: u32 = 1080;
+
+/// A music video's picture as the video state reads it.
+struct Picture(ytmusic::AudioStream);
+
+#[async_trait]
+impl VideoBody for Picture {
+    async fn chunk(&mut self) -> Result<Option<bytes::Bytes>> {
+        self.0.chunk().await
+    }
+}
 
 pub struct YouTubeClient {
     api: Arc<YtMusic>,
@@ -258,6 +272,26 @@ impl MusicApi for YouTubeClient {
 
     async fn track_playcount(&self, _track_id: &str) -> Result<Option<u64>> {
         Ok(None)
+    }
+
+    async fn open_video(&self, track_id: &str) -> Result<Option<VideoStream>> {
+        let Some((video, stream)) = self.api.open_video(track_id, VIDEO_HEIGHT).await? else {
+            return Ok(None);
+        };
+        log::debug!(
+            "video: {track_id} opens at {}x{} {} fps, itag {}",
+            video.width,
+            video.height,
+            video.fps,
+            video.format.itag
+        );
+        Ok(Some(VideoStream {
+            width: video.width,
+            height: video.height,
+            fps: video.fps,
+            total: stream.total(),
+            body: Box::new(Picture(stream)),
+        }))
     }
 
     async fn report(&self, track_id: &str, report: Report, position: Duration) -> Result<()> {

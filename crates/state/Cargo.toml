@@ -33,7 +33,9 @@ storage.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true
+bytes.workspace = true
 ui.workspace = true
+video.workspace = true
 webview.workspace = true
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]

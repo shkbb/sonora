@@ -327,6 +327,7 @@ fn open_window(cx: &mut App) {
         signal: _,
         updates: _,
         usage: _,
+        video: _,
         wake: _,
     } = Sonora::global(cx);
     let (session, library, playback, queue) = (

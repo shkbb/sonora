@@ -1,5 +1,6 @@
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gpui::accesskit::Role;
@@ -7,13 +8,16 @@ use gpui::prelude::*;
 use gpui::{
     AnyView, App, Bounds, ClickEvent, Context, Entity, FocusHandle, FontWeight, KeyDownEvent,
     MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
-    Render, ScrollWheelEvent, SharedString, SpringState, Task, TextShadow,
+    Render, RenderImage, ScrollWheelEvent, SharedString, SpringState, Task, TextShadow,
 };
-use gpui::{Window, canvas, deferred, div, phi, point, px, relative};
+use gpui::{ObjectFit, Window, canvas, deferred, div, img, phi, point, px, relative};
 use i18n::t;
 use input::{ToggleFullscreen, ToggleWindowFullscreen, WORKSPACE_CONTEXT};
 use router::{Destination, navigate};
-use state::{AppSettings, Cover, FullscreenControlsAutohide, Playback, Queue, SideTab, Sonora};
+use state::{
+    AppSettings, Cover, FullscreenControlsAutohide, Playback, PlaybackState, Queue, SideTab,
+    Sonora, Video,
+};
 use ui::{
     ActiveTheme as _, Artwork, Button, Entrance, ExplicitBadge, Fading as _, GLASS_BLUR,
     GLASS_FILL, InlineLink, InlineLinks, Motion, Motioned as _, Popup, Rising as _, Room,
@@ -91,6 +95,10 @@ const SPRING_STALL: Duration = Duration::from_millis(64);
 pub struct FullscreenView {
     playback: Entity<Playback>,
     cover: Entity<Cover>,
+    /// The music video's picture, which takes the cover's place while there is one.
+    video: Entity<Video>,
+    /// The video frame drawn last, freed from the GPU once a later one replaces it.
+    shown_frame: Option<Arc<RenderImage>>,
     settings: Entity<AppSettings>,
     aside: Entity<Aside>,
     panel: Option<SideTab>,
@@ -139,6 +147,8 @@ impl FullscreenView {
         cx.observe(&playback, |_, _, cx| cx.notify()).detach();
         let cover = Sonora::global(cx).cover.clone();
         cx.observe(&cover, |_, _, cx| cx.notify()).detach();
+        let video = Sonora::global(cx).video.clone();
+        cx.observe(&video, |_, _, cx| cx.notify()).detach();
         let library = Sonora::global(cx).library.clone();
         cx.observe(&library, |_, _, cx| cx.notify()).detach();
         let settings = Sonora::global(cx).settings.clone();
@@ -153,6 +163,8 @@ impl FullscreenView {
         Self {
             playback,
             cover,
+            video,
+            shown_frame: None,
             settings,
             aside,
             panel,
@@ -200,6 +212,8 @@ impl FullscreenView {
     /// Starts the idle clock as the view opens and stops it as the view closes, so it never
     /// hides the cursor over the workspace. Either way the view next shows with its controls up.
     pub fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+        self.video
+            .update(cx, |video, cx| video.set_wanted(shown, cx));
         self.flip(true);
         self.hidden = SpringState {
             position: 0.,
@@ -434,14 +448,59 @@ impl FullscreenView {
             .update(cx, |playback, cx| playback.seek_fraction(fraction, cx));
     }
 
+    /// The video frame due now, keeping frames coming while the video plays. The frame it
+    /// replaces is freed from the GPU, since every frame is an image of its own.
+    fn picture(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
+        let (frame, loaded) = self
+            .video
+            .update(cx, |video, cx| (video.frame(cx), video.has_picture()));
+        let playing = *self.playback.read(cx).state() == PlaybackState::Playing;
+        if loaded && (playing || frame.is_none()) {
+            window.request_animation_frame();
+        }
+        let same = match (&frame, &self.shown_frame) {
+            (Some(new), Some(old)) => Arc::ptr_eq(new, old),
+            (None, None) => true,
+            _ => false,
+        };
+        if !same {
+            if let Some(old) = self.shown_frame.take() {
+                window.drop_image(old).ok();
+            }
+            self.shown_frame = frame.clone();
+        }
+        frame
+    }
+
     fn artwork(
         &mut self,
         layout_side: Pixels,
         raster_side: Pixels,
         presentation_scale: f32,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let radius = cx.theme().radius * 2.;
+        if let Some(frame) = self.picture(window, cx) {
+            let (width, height) = self.video.read(cx).size().unwrap_or((16, 9));
+            let tall = raster_side * (height as f32 / width.max(1) as f32);
+            return div()
+                .id("fullscreen-artwork")
+                .relative()
+                .size(layout_side)
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    img(frame)
+                        .w(raster_side)
+                        .h(tall)
+                        .object_fit(ObjectFit::Contain)
+                        .rounded(radius),
+                )
+                .into_any_element();
+        }
         let pad = px(COVER_LAYER_PAD);
         let inset = (layout_side - raster_side) / 2. - pad;
         let (album, small, local_id, named) = match self.playback.read(cx).shown_track(cx) {
@@ -525,6 +584,7 @@ impl FullscreenView {
                             }),
                     ),
             )
+            .into_any_element()
     }
 
     fn open_context_menu(
@@ -1499,7 +1559,7 @@ impl Render for FullscreenView {
                                 // A split column carries the pill in its dock, and its cover
                                 // holds still while the panel beside it enters.
                                 .when(!split, |this| entering(this, switching))
-                                .child(self.artwork(side, raster_side, cover_scale, cx))
+                                .child(self.artwork(side, raster_side, cover_scale, window, cx))
                                 .child(self.meta(hide, lift, window, cx))
                                 .when(split, |this| {
                                     this.child(self.dock(

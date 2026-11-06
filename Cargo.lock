@@ -7453,6 +7453,7 @@ dependencies = [
  "ashpd",
  "async-trait",
  "base64",
+ "bytes",
  "cli",
  "dirs",
  "discord-rich-presence",
@@ -7482,6 +7483,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "ui",
+ "video",
  "webview",
  "windows-sys 0.61.2",
 ]
