@@ -26,6 +26,7 @@ actions!(
         ToggleFullscreen,
         ToggleQueue,
         ToggleLyrics,
+        ToggleVideo,
         ShowMembers,
         CloseWindow,
         MinimizeWindow,

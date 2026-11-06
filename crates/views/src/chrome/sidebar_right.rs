@@ -3,7 +3,7 @@ use gpui::{Context, Entity, Pixels, Render, StyleRefinement, Window, div, px};
 use state::{AppSettings, Playback, Queue, SideTab, Sonora};
 use ui::{ActiveTheme as _, MIN_CONTENT, Panel, Room, Side};
 
-use crate::chrome::{Aside, Members};
+use crate::chrome::{Aside, Members, VideoPanel};
 
 const MIN_WIDTH: Pixels = px(240.);
 const MAX_WIDTH: Pixels = px(560.);
@@ -12,11 +12,12 @@ fn fills_content(width: Pixels) -> bool {
     !Room::of(width).fits(Room::Wide)
 }
 
-/// The right sidebar: the queue and the lyrics, which share one view, and the members of the
-/// session or Jam the listener is in.
+/// The right sidebar: the queue and the lyrics, which share one view, the members of the
+/// session or Jam the listener is in, and the music video playing.
 pub(crate) struct SidebarRight {
     aside: Entity<Aside>,
     members: Entity<Members>,
+    video: Entity<VideoPanel>,
     settings: Entity<AppSettings>,
     width: Pixels,
     open: bool,
@@ -35,15 +36,20 @@ impl SidebarRight {
         let tab = settings.read(cx).sidebar_right_tab();
         // the shared view starts on the queue while the members are what shows
         let shown = match tab {
-            SideTab::Members => SideTab::Queue,
+            SideTab::Members | SideTab::Video => SideTab::Queue,
             tab => tab,
         };
         let aside = cx.new(|cx| Aside::new(queue, playback, shown, cx));
         let members = cx.new(Members::new);
+        let video = cx.new(VideoPanel::new);
+        video.update(cx, |video, cx| {
+            video.set_shown(open && tab == SideTab::Video, cx)
+        });
 
         Self {
             aside,
             members,
+            video,
             settings,
             width,
             open,
@@ -82,10 +88,11 @@ impl SidebarRight {
 
     pub(crate) fn toggle(&mut self, cx: &mut Context<Self>) {
         self.open = !self.open;
-        if self.open && self.tab != SideTab::Members {
+        if self.open && self.tab.shared() {
             let tab = self.tab;
             self.aside.update(cx, |aside, cx| aside.show(tab, cx));
         }
+        self.watch_video(cx);
         self.remember(cx);
         cx.notify();
     }
@@ -99,11 +106,12 @@ impl SidebarRight {
             self.settings
                 .update(cx, |settings, cx| settings.set_sidebar_right_tab(tab, cx));
         }
-        if tab != SideTab::Members {
+        if tab.shared() {
             self.aside.update(cx, |aside, cx| aside.show(tab, cx));
         }
         self.tab = tab;
         self.open = true;
+        self.watch_video(cx);
         self.remember(cx);
         cx.notify();
     }
@@ -117,9 +125,17 @@ impl SidebarRight {
         self.show(tab, cx);
     }
 
+    /// Tells the Video tab whether it is on screen, so the picture decodes only while it is.
+    fn watch_video(&self, cx: &mut Context<Self>) {
+        let shown = self.open && self.tab == SideTab::Video;
+        self.video
+            .update(cx, |video, cx| video.set_shown(shown, cx));
+    }
+
     pub(crate) fn close(&mut self, cx: &mut Context<Self>) {
         self.aside.update(cx, |aside, cx| aside.dismiss(cx));
         self.open = false;
+        self.watch_video(cx);
         self.remember(cx);
         cx.notify();
     }
@@ -159,6 +175,7 @@ impl Render for SidebarRight {
             .border_color(theme.border)
             .child(match self.tab {
                 SideTab::Members => self.members.clone().into_any_element(),
+                SideTab::Video => self.video.clone().into_any_element(),
                 _ => self
                     .aside
                     .clone()

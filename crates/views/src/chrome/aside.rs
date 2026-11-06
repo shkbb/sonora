@@ -369,7 +369,7 @@ impl Aside {
         match self.tab {
             SideTab::Lyrics => self.verse_bar.read(cx).hovered(),
             // the members are never drawn here, but by `Members`
-            SideTab::Members => false,
+            SideTab::Members | SideTab::Video => false,
             SideTab::Queue => self.scrollbar.read(cx).hovered(),
         }
     }
@@ -845,6 +845,7 @@ impl Aside {
                         SideTab::Queue => t!("queue-title"),
                         SideTab::Lyrics => t!("lyrics-title"),
                         SideTab::Members => t!("members-title"),
+                        SideTab::Video => t!("video-title"),
                     },
                     cx,
                 ))
@@ -1997,6 +1998,7 @@ impl Render for Aside {
                 SideTab::Queue => t!("queue-title"),
                 SideTab::Lyrics => t!("lyrics-title"),
                 SideTab::Members => t!("members-title"),
+                SideTab::Video => t!("video-title"),
             })
             .flex()
             .flex_col()

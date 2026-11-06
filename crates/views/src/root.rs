@@ -3,7 +3,7 @@ use gpui::{App, Font, FontFallbacks, SharedString, StyleRefinement, font, prelud
 use gpui::{Window, div};
 use input::{
     CloseWindow, MinimizeWindow, NavigateBack, NavigateForward, OpenFilter, OpenSearch,
-    OpenSettings, Refresh, ShowMembers, ToggleFullscreen, ToggleLyrics, ToggleQueue,
+    OpenSettings, Refresh, ShowMembers, ToggleFullscreen, ToggleLyrics, ToggleQueue, ToggleVideo,
     ToggleWindowFullscreen, ZoomWindow,
 };
 use router::{Destination, NavigationEvent, Screen, back, forward, navigate};
@@ -1232,6 +1232,9 @@ impl Render for Root {
             )
             .on_action(
                 cx.listener(|this, _: &ToggleLyrics, _, cx| this.show_side(SideTab::Lyrics, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &ToggleVideo, _, cx| this.show_side(SideTab::Video, cx)),
             )
             .on_action(
                 cx.listener(|this, _: &ShowMembers, _, cx| this.reveal_side(SideTab::Members, cx)),

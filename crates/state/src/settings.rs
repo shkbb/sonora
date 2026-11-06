@@ -177,6 +177,15 @@ pub enum SideTab {
     Lyrics,
     /// The people in the Sonora Session or Spotify Jam the listener is in.
     Members,
+    /// The picture of the music video playing.
+    Video,
+}
+
+impl SideTab {
+    /// Whether the tab is one of the two that share the queue and lyrics view.
+    pub fn shared(self) -> bool {
+        matches!(self, Self::Queue | Self::Lyrics)
+    }
 }
 
 /// The writing systems lyrics romanization applies to. Only CJK are enabled by default.

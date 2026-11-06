@@ -212,6 +212,8 @@ confirm-delete-track-files = Файли буде остаточно видале
 
 # queue panel
 queue-title = Черга
+video-title = Відео
+video-none = У цього треку немає кліпу. Увімкніть відео з YouTube Music, щоб дивитися його тут
 queue-history = Історія
 queue-now-playing = Зараз грає
 queue-from = З

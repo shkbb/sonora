@@ -95,7 +95,7 @@ pub use toast::{Outcome, Target, Toast, ToastAction, Toasts};
 pub use updates::{Channel, Release, UpdateState, Updates, VERSION, updates_itself};
 pub use usage::Usage;
 pub use vault::CACHE_GB_RANGE;
-pub use video::Video;
+pub use video::{Video, Viewer};
 pub use wake::Wake;
 pub use window_shape::{apply_window_rounding, install_rounded_window_hook};
 

@@ -1,6 +1,5 @@
 use std::cell::Cell;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gpui::accesskit::Role;
@@ -8,15 +7,14 @@ use gpui::prelude::*;
 use gpui::{
     AnyView, App, Bounds, ClickEvent, Context, Entity, FocusHandle, FontWeight, KeyDownEvent,
     MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
-    Render, RenderImage, ScrollWheelEvent, SharedString, SpringState, Task, TextShadow,
+    Render, ScrollWheelEvent, SharedString, SpringState, Task, TextShadow,
 };
 use gpui::{ObjectFit, Window, canvas, deferred, div, img, phi, point, px, relative};
 use i18n::t;
 use input::{ToggleFullscreen, ToggleWindowFullscreen, WORKSPACE_CONTEXT};
 use router::{Destination, navigate};
 use state::{
-    AppSettings, Cover, FullscreenControlsAutohide, Playback, PlaybackState, Queue, SideTab,
-    Sonora, Video,
+    AppSettings, Cover, FullscreenControlsAutohide, Playback, Queue, SideTab, Sonora, Video, Viewer,
 };
 use ui::{
     ActiveTheme as _, Artwork, Button, Entrance, ExplicitBadge, Fading as _, GLASS_BLUR,
@@ -27,6 +25,7 @@ use ui::{
 
 use crate::chrome::{Aside, TitleBarOptions};
 use crate::shared::menus::ItemMenu;
+use crate::shared::picture::Picture;
 use crate::shared::transport::{NOTCH, fraction, like, moved, percent, transport, volume_icon};
 use crate::shared::visualizer::VisualizerDrive;
 use crate::shared::{self, ambient};
@@ -97,8 +96,8 @@ pub struct FullscreenView {
     cover: Entity<Cover>,
     /// The music video's picture, which takes the cover's place while there is one.
     video: Entity<Video>,
-    /// The video frame drawn last, freed from the GPU once a later one replaces it.
-    shown_frame: Option<Arc<RenderImage>>,
+    /// The music video's frames, which fill the window while the track has a picture.
+    picture: Picture,
     settings: Entity<AppSettings>,
     aside: Entity<Aside>,
     panel: Option<SideTab>,
@@ -164,7 +163,7 @@ impl FullscreenView {
             playback,
             cover,
             video,
-            shown_frame: None,
+            picture: Picture::default(),
             settings,
             aside,
             panel,
@@ -213,7 +212,7 @@ impl FullscreenView {
     /// hides the cursor over the workspace. Either way the view next shows with its controls up.
     pub fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
         self.video
-            .update(cx, |video, cx| video.set_wanted(shown, cx));
+            .update(cx, |video, cx| video.watch(Viewer::Fullscreen, shown, cx));
         self.flip(true);
         self.hidden = SpringState {
             position: 0.,
@@ -448,59 +447,15 @@ impl FullscreenView {
             .update(cx, |playback, cx| playback.seek_fraction(fraction, cx));
     }
 
-    /// The video frame due now, keeping frames coming while the video plays. The frame it
-    /// replaces is freed from the GPU, since every frame is an image of its own.
-    fn picture(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
-        let (frame, loaded) = self
-            .video
-            .update(cx, |video, cx| (video.frame(cx), video.has_picture()));
-        let playing = *self.playback.read(cx).state() == PlaybackState::Playing;
-        if loaded && (playing || frame.is_none()) {
-            window.request_animation_frame();
-        }
-        let same = match (&frame, &self.shown_frame) {
-            (Some(new), Some(old)) => Arc::ptr_eq(new, old),
-            (None, None) => true,
-            _ => false,
-        };
-        if !same {
-            if let Some(old) = self.shown_frame.take() {
-                window.drop_image(old).ok();
-            }
-            self.shown_frame = frame.clone();
-        }
-        frame
-    }
-
     fn artwork(
         &mut self,
         layout_side: Pixels,
         raster_side: Pixels,
         presentation_scale: f32,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let radius = cx.theme().radius * 2.;
-        if let Some(frame) = self.picture(window, cx) {
-            let (width, height) = self.video.read(cx).size().unwrap_or((16, 9));
-            let tall = raster_side * (height as f32 / width.max(1) as f32);
-            return div()
-                .id("fullscreen-artwork")
-                .relative()
-                .size(layout_side)
-                .flex_none()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    img(frame)
-                        .w(raster_side)
-                        .h(tall)
-                        .object_fit(ObjectFit::Contain)
-                        .rounded(radius),
-                )
-                .into_any_element();
-        }
+
         let pad = px(COVER_LAYER_PAD);
         let inset = (layout_side - raster_side) / 2. - pad;
         let (album, small, local_id, named) = match self.playback.read(cx).shown_track(cx) {
@@ -1341,7 +1296,11 @@ impl Render for FullscreenView {
         let theme = *cx.theme();
         let viewport = window.viewport_size();
         let room = Room::of(viewport.width);
-        let split = room.fits(Room::Wide) && self.panel.is_some();
+        // A music video fills the window, the way a cinema would, and the controls float over
+        // it. The cover column and the side panel step aside for it.
+        let frame = self.picture.frame(&self.video, &self.playback, window, cx);
+        let cinema = self.video.read(cx).has_picture();
+        let split = !cinema && room.fits(Room::Wide) && self.panel.is_some();
         self.watch(window, cx);
         let idle = self.hidden(window, cx);
         let switching = self.switching(window, cx);
@@ -1411,7 +1370,7 @@ impl Render for FullscreenView {
         let side = snapped(near, window);
         let raster_side = snapped(far, window);
         let cover_scale = presentation_scale(presented_side, raster_side);
-        let staged = self.panel.is_none() || split;
+        let staged = !cinema && (self.panel.is_none() || split);
         // The column settles by half of what the dock gives up and the meta by half of what the
         // cover grows, both straight along `hide` to a rest that sits on the device grid, so
         // neither steps a whole pixel at a time through layout in the slow tail of the spring.
@@ -1430,8 +1389,10 @@ impl Render for FullscreenView {
         };
 
         let style = self.settings.read(cx).visualizer_style();
-        let visualizer_on =
-            self.panel.is_none() && style.shown() && self.playback.read(cx).steered(cx).is_none();
+        let visualizer_on = !cinema
+            && self.panel.is_none()
+            && style.shown()
+            && self.playback.read(cx).steered(cx).is_none();
         match visualizer_on
             .then(|| self.playback.read(cx).spectrum(cx))
             .flatten()
@@ -1495,6 +1456,17 @@ impl Render for FullscreenView {
                     .absolute()
                     .size_full(),
             )
+            .when(cinema, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .bg(gpui::black())
+                        .when_some(frame, |this, frame| {
+                            this.child(img(frame).size_full().object_fit(ObjectFit::Contain))
+                        }),
+                )
+            })
             .when(visualizer_on, |this| {
                 this.child(
                     Visualizer::new(self.visualizer.levels(), visualizer_max)
@@ -1559,7 +1531,7 @@ impl Render for FullscreenView {
                                 // A split column carries the pill in its dock, and its cover
                                 // holds still while the panel beside it enters.
                                 .when(!split, |this| entering(this, switching))
-                                .child(self.artwork(side, raster_side, cover_scale, window, cx))
+                                .child(self.artwork(side, raster_side, cover_scale, cx))
                                 .child(self.meta(hide, lift, window, cx))
                                 .when(split, |this| {
                                     this.child(self.dock(
@@ -1572,7 +1544,7 @@ impl Render for FullscreenView {
                                 }),
                         )
                     })
-                    .when(self.panel.is_some(), |this| {
+                    .when(!cinema && self.panel.is_some(), |this| {
                         this.child(
                             div()
                                 .id("fullscreen-panel")
@@ -1592,7 +1564,7 @@ impl Render for FullscreenView {
                         )
                     }),
             )
-            .when(!split && self.panel.is_some(), |this| {
+            .when(cinema || (!split && self.panel.is_some()), |this| {
                 this.child(self.strip(hide, window, cx))
             })
             .when(!split, |this| {

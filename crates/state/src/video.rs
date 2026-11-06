@@ -30,12 +30,22 @@ pub struct Video {
     playback: Entity<Playback>,
     session: Entity<Session>,
     io: Io,
-    /// Whether anything wants the picture, so a track plays without decoding one unseen.
-    wanted: bool,
+    /// The views showing the picture. Nothing is decoded while there are none, so a track
+    /// plays without a picture nobody sees.
+    viewers: u8,
     /// The track whose picture is loaded or being looked for.
     following: Option<String>,
     pipeline: Option<Pipeline>,
     opening: Option<Task<()>>,
+}
+
+/// A view that shows the picture. Each is a bit in [`Video::viewers`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Viewer {
+    /// The Video tab of the right sidebar.
+    Panel = 1,
+    /// The fullscreen player.
+    Fullscreen = 2,
 }
 
 /// One video being downloaded and decoded.
@@ -80,21 +90,32 @@ impl Video {
             playback,
             session,
             io,
-            wanted: false,
+            viewers: 0,
             following: None,
             pipeline: None,
             opening: None,
         }
     }
 
-    /// Says whether a view shows the picture. Nothing is downloaded or decoded while none does.
-    pub fn set_wanted(&mut self, wanted: bool, cx: &mut Context<Self>) {
-        if self.wanted == wanted {
+    /// Says whether `viewer` shows the picture. Nothing is downloaded or decoded while no
+    /// view does.
+    pub fn watch(&mut self, viewer: Viewer, watching: bool, cx: &mut Context<Self>) {
+        let viewers = match watching {
+            true => self.viewers | viewer as u8,
+            false => self.viewers & !(viewer as u8),
+        };
+        if (viewers == 0) == (self.viewers == 0) {
+            self.viewers = viewers;
             return;
         }
-        self.wanted = wanted;
+        self.viewers = viewers;
         self.following = None;
         self.follow(cx);
+    }
+
+    /// Whether the picture of the track playing is still being looked for.
+    pub fn is_opening(&self) -> bool {
+        self.opening.is_some()
     }
 
     /// Whether the track playing has a picture loaded to show.
@@ -143,7 +164,7 @@ impl Video {
         let id = playback
             .track()
             .and_then(|track| track.id.clone())
-            .filter(|_| self.wanted)
+            .filter(|_| self.viewers != 0)
             .filter(|id| !music::is_local_id(id));
         let stopped = matches!(
             playback.state(),
