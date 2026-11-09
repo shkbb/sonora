@@ -974,6 +974,7 @@ pub fn artist_profile(value: &Resource) -> Option<ArtistProfile> {
     Some(ArtistProfile {
         name: text(&attributes.name)?,
         cover_large: artwork(attributes, HERO),
+        banner: None,
         biography: text(&notes.standard)
             .or_else(|| text(&notes.short))
             .or_else(|| text(&attributes.artist_bio)),

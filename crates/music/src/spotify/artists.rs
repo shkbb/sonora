@@ -363,6 +363,7 @@ fn profile_from(artist: &ArtistMessage) -> ArtistProfile {
                 .map(plain_text)
                 .filter(|text| !text.is_empty())
         }),
+        banner: None,
     }
 }
 

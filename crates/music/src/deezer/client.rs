@@ -1005,6 +1005,7 @@ impl MusicApi for DeezerClient {
                 .and_then(Value::as_str)
                 .map(str::to_owned),
             biography: None,
+            banner: None,
         })
     }
 

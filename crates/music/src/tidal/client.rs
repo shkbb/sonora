@@ -1168,6 +1168,7 @@ impl MusicApi for TidalClient {
         Ok(ArtistProfile {
             name: wire::text(&detail, "name").unwrap_or_default().to_owned(),
             cover_large: wire::image(wire::text(&detail, "picture"), wire::PORTRAIT_LARGE),
+            banner: None,
             biography,
         })
     }

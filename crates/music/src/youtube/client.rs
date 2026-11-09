@@ -274,6 +274,17 @@ impl MusicApi for YouTubeClient {
         Ok(None)
     }
 
+    async fn counterpart(&self, track_id: &str) -> Result<Option<Track>> {
+        let Some(other) = self.api.counterpart(track_id).await? else {
+            return Ok(None);
+        };
+        Ok(Some(self.track(&other).await?))
+    }
+
+    async fn has_video(&self, track_id: &str) -> Result<bool> {
+        self.api.is_music_video(track_id).await
+    }
+
     async fn open_video(&self, track_id: &str) -> Result<Option<VideoStream>> {
         let Some((video, stream)) = self.api.open_video(track_id, VIDEO_HEIGHT).await? else {
             return Ok(None);
@@ -484,6 +495,17 @@ impl MusicApi for YouTubeClient {
         Ok(self
             .api
             .search_songs(query)
+            .await?
+            .into_iter()
+            .enumerate()
+            .map(|(index, track)| wire::track(track, index as u32))
+            .collect())
+    }
+
+    async fn search_videos(&self, query: &str) -> Result<Vec<Track>> {
+        Ok(self
+            .api
+            .search_videos(query)
             .await?
             .into_iter()
             .enumerate()

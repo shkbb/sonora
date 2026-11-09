@@ -439,6 +439,7 @@ impl MusicApi for SubsonicClient {
         Ok(ArtistProfile {
             name: artist.name,
             cover_large: artist.cover_large,
+            banner: None,
             biography: artist.biography,
         })
     }

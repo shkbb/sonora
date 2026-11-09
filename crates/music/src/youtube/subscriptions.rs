@@ -5,6 +5,9 @@ use ytmusic::{Client, YtMusic};
 
 use crate::SavedArtist;
 
+/// The side an artist's portrait is asked for at, enough for a list row on a dense screen.
+const PORTRAIT: u32 = 240;
+
 const LIBRARY_SUBSCRIPTIONS: &str = "FEmusic_library_corpus_artists";
 
 pub async fn saved(api: &YtMusic) -> Result<Vec<SavedArtist>> {
@@ -72,7 +75,7 @@ fn saved_artist(renderer: &serde_json::Value) -> Option<SavedArtist> {
         })?,
         cover: ytmusic::parse::thumbnails(renderer)
             .last()
-            .map(|thumbnail| thumbnail.url.clone()),
+            .map(|thumbnail| crate::artwork::larger(&thumbnail.url, PORTRAIT)),
         added_at: None,
     })
 }

@@ -310,6 +310,8 @@ pub struct PlaylistDetail {
 pub struct ArtistProfile {
     pub name: String,
     pub cover_large: Option<String>,
+    /// A wide picture of the artist, when the provider keeps one apart from the portrait.
+    pub banner: Option<String>,
     pub biography: Option<String>,
 }
 

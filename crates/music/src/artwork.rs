@@ -8,6 +8,90 @@ const ALBUMS: &str = "https://api.deezer.com/search/album";
 const TRACKS: &str = "https://api.deezer.com/search/track";
 const RESULTS: &str = "10";
 
+/// The same YouTube picture at `edge` pixels or more on its longer side, as Google's servers
+/// scale it. Album art and avatars on Google's image servers take their size in the url, as
+/// `=w<width>-h<height>` or `=s<side>`; a video still on `i.ytimg.com` is asked for as its
+/// 1280-wide still, without the query that crops it smaller. Any other url, or one already that
+/// large, comes back unchanged.
+pub fn larger(url: &str, edge: u32) -> String {
+    if let Some(still) = video_still(url) {
+        return still;
+    }
+    let Some((base, options)) = url.rsplit_once('=') else {
+        return url.to_owned();
+    };
+    let google = [".googleusercontent.com/", ".ggpht.com/"]
+        .iter()
+        .any(|host| base.contains(host));
+    if !google {
+        return url.to_owned();
+    }
+    let size = |prefix: char| {
+        options
+            .split('-')
+            .find_map(|option| option.strip_prefix(prefix)?.parse::<u32>().ok())
+    };
+    let numeric = |option: &str, prefix: char| {
+        option
+            .strip_prefix(prefix)
+            .is_some_and(|value| value.parse::<u32>().is_ok())
+    };
+    if let Some(side) = size('s') {
+        if side >= edge {
+            return url.to_owned();
+        }
+        let options = options
+            .split('-')
+            .map(|option| match numeric(option, 's') {
+                true => format!("s{edge}"),
+                false => option.to_owned(),
+            })
+            .collect::<Vec<_>>()
+            .join("-");
+        return format!("{base}={options}");
+    }
+    let (Some(width), Some(height)) = (size('w'), size('h')) else {
+        return url.to_owned();
+    };
+    let longer = width.max(height);
+    if longer == 0 || longer >= edge {
+        return url.to_owned();
+    }
+    let scale = |side: u32| u64::from(side) * u64::from(edge) / u64::from(longer);
+    let options = options
+        .split('-')
+        .map(|option| {
+            if numeric(option, 'w') {
+                format!("w{}", scale(width))
+            } else if numeric(option, 'h') {
+                format!("h{}", scale(height))
+            } else {
+                option.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("-");
+    format!("{base}={options}")
+}
+
+/// The 1280-wide still of a video on `i.ytimg.com`, from any of the smaller ones YouTube Music
+/// hands out. The smaller ones are 4:3 with black bars, and their query crops them further.
+fn video_still(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("https://i.ytimg.com/vi/")?;
+    let (id, file) = rest.split_once('/')?;
+    let file = file.split('?').next()?;
+    let small = [
+        "default.jpg",
+        "mqdefault.jpg",
+        "hqdefault.jpg",
+        "sddefault.jpg",
+        "hq720.jpg",
+    ];
+    small
+        .contains(&file)
+        .then(|| format!("https://i.ytimg.com/vi/{id}/hq720.jpg"))
+}
+
 /// Finds cover art by name in Deezer's public catalogue, which needs no account and serves every
 /// image from a public https url. It is for a track whose own art cannot be handed to someone
 /// else, so a miss is `None` rather than an error.
@@ -204,4 +288,28 @@ fn compared(text: &str) -> String {
         .map(str::to_lowercase)
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::larger;
+
+    #[test]
+    fn youtube_pictures_come_back_larger() {
+        assert_eq!(
+            larger("https://yt3.ggpht.com/abc=s88-c-k-c0x00ffffff-no-rj", 1200),
+            "https://yt3.ggpht.com/abc=s1200-c-k-c0x00ffffff-no-rj"
+        );
+        assert_eq!(
+            larger("https://lh3.googleusercontent.com/x=w60-h60-l90-rj", 1200),
+            "https://lh3.googleusercontent.com/x=w1200-h1200-l90-rj"
+        );
+        assert_eq!(
+            larger(
+                "https://i.ytimg.com/vi/abc/hqdefault.jpg?sqp=xyz&rs=1",
+                1200
+            ),
+            "https://i.ytimg.com/vi/abc/hq720.jpg"
+        );
+    }
 }

@@ -275,6 +275,7 @@ impl MusicApi for LocalClient {
         Ok(ArtistProfile {
             name: artist.name,
             cover_large: artist.cover,
+            banner: None,
             biography: None,
         })
     }
