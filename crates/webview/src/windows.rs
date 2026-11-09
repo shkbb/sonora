@@ -59,6 +59,7 @@ impl Window {
             hwnd,
             &target.url,
             target.script.clone(),
+            target.profile.clone(),
             Rc::downgrade(&browser),
         );
         if let Err(error) = begun {
@@ -197,6 +198,7 @@ fn begin_environment(
     hwnd: HWND,
     url: &str,
     script: Option<String>,
+    profile: Option<String>,
     browser: Weak<RefCell<Option<Browser>>>,
 ) -> Result<()> {
     let url = url.to_string();
@@ -205,7 +207,9 @@ fn begin_environment(
             let result = result
                 .context("WebView2 could not create an environment")
                 .and_then(|()| environment.context("WebView2 returned no environment"))
-                .and_then(|environment| begin_controller(environment, hwnd, url, script, browser));
+                .and_then(|environment| {
+                    begin_controller(environment, hwnd, url, script, profile, browser)
+                });
             if let Err(error) = result {
                 fail(hwnd, error);
             }
@@ -243,6 +247,7 @@ fn begin_controller(
     hwnd: HWND,
     url: String,
     script: Option<String>,
+    kept: Option<String>,
     browser: Weak<RefCell<Option<Browser>>>,
 ) -> Result<()> {
     let environment = environment
@@ -250,12 +255,21 @@ fn begin_controller(
         .context("the installed WebView2 runtime does not support private profiles")?;
     let options = unsafe { environment.CreateCoreWebView2ControllerOptions() }
         .context("cannot configure the private sign-in profile")?;
-    let profile = GUID::new().context("cannot identify the private sign-in profile")?;
-    let profile = wide(&format!("Sonora-{profile:?}"));
+    // A kept profile holds its session between windows; any other window gets a private one
+    // of its own that goes with it.
+    let private = kept.is_none();
+    let profile = match kept {
+        Some(name) => format!("Sonora-{name}"),
+        None => {
+            let id = GUID::new().context("cannot identify the private sign-in profile")?;
+            format!("Sonora-{id:?}")
+        }
+    };
+    let profile = wide(&profile);
     unsafe { options.SetProfileName(PCWSTR(profile.as_ptr())) }
         .context("cannot name the sign-in profile")?;
-    unsafe { options.SetIsInPrivateModeEnabled(true) }
-        .context("cannot make the sign-in profile private")?;
+    unsafe { options.SetIsInPrivateModeEnabled(private) }
+        .context("cannot set the sign-in profile's privacy")?;
 
     let handler = CreateCoreWebView2ControllerCompletedHandler::create(Box::new(
         move |result, controller| {

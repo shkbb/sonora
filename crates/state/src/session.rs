@@ -19,6 +19,19 @@ use crate::{Io, Network, Outcome, Scan, Shelf, Target, Toast, Toasts, join};
 const HEARTBEAT: Duration = Duration::from_secs(30);
 /// How often the sign-in window is asked whether the user is through.
 const WINDOW_POLL: Duration = Duration::from_millis(300);
+/// How often a signed-in session that only its browser can renew is renewed through a hidden
+/// page. Google lets such a session go about two hours after its last renewal.
+const KEEP: Duration = Duration::from_secs(40 * 60);
+/// How often the session looks whether a renewal is due: one is due every [`KEEP`], and at once
+/// when the provider says the session was just answered as signed out.
+const KEEP_CHECK: Duration = Duration::from_secs(20);
+/// The least time between two renewals, so a session that cannot be renewed is not hammered.
+const KEEP_REST: Duration = Duration::from_secs(3 * 60);
+/// How long a renewal page loads before its cookies are taken, which is time for the browser to
+/// renew a session that is due.
+const KEEP_SETTLE: Duration = Duration::from_secs(12);
+/// How long a renewal page gets before it is given up on.
+const KEEP_PATIENCE: Duration = Duration::from_secs(40);
 const BACKOFF: [Duration; 5] = [
     Duration::ZERO,
     Duration::from_secs(5),
@@ -127,6 +140,13 @@ pub struct Session {
     /// The browser window a `SignInPrompt::Secret` opened, while it is up.
     window: Option<webview::Page>,
     window_task: Option<Task<()>>,
+    /// The hidden page renewing a bound sign-in, while it is open.
+    keeper: Option<webview::Page>,
+    keeper_task: Option<Task<()>>,
+    /// The timer that renews the signed-in session through [`Self::keeper`] every [`KEEP`].
+    keep_timer: Option<Task<()>>,
+    /// The providers a failed restore already tried to renew, so it falls back the second time.
+    renew_tried: Vec<usize>,
     local_provider: Arc<dyn MusicProvider>,
     local_folders: Vec<PathBuf>,
     local_client: Option<Arc<dyn MusicApi>>,
@@ -182,6 +202,10 @@ impl Session {
             input: None,
             window: None,
             window_task: None,
+            keeper: None,
+            keeper_task: None,
+            keep_timer: None,
+            renew_tried: Vec::new(),
             local_provider,
             local_folders,
             local_client: None,
@@ -461,6 +485,15 @@ impl Session {
 
             this.update(cx, |this, cx| match restored {
                 Ok(Some(session)) => this.signed_in(session, index, cx),
+                // A session only the browser can renew may just be due for it, so the browser
+                // is asked once before the sign-in counts as refused.
+                Ok(None)
+                    if !this.renew_tried.contains(&index)
+                        && this.providers[index].keeper().is_some() =>
+                {
+                    this.renew_tried.push(index);
+                    this.renew(index, true, cx);
+                }
                 Ok(None) => this.fall_back(index, None, cx),
                 // An account that is only out of reach is kept, and the app carries on offline.
                 Err(error) if Failure::new(&error).offline() && this.stored_active() => {
@@ -685,6 +718,7 @@ impl Session {
             title: t!("login-window-title", provider = provider.name()).to_string(),
             agent: sign_in.agent.map(str::to_owned),
             script: None,
+            profile: sign_in.profile.map(str::to_owned),
         };
         match webview::Page::open(target) {
             Ok(login) => self.window = Some(login),
@@ -807,6 +841,7 @@ impl Session {
         self.input = None;
         self.window = None;
         self.window_task = None;
+        self.keep_timer = None;
         self.awaiting = None;
         self.resume = None;
         self.client = None;
@@ -845,9 +880,137 @@ impl Session {
         self.capabilities = session.capabilities;
         self.state = SessionState::SignedIn(session.profile);
         self.attempt = 0;
+        self.renew_tried.retain(|tried| *tried != index);
         self.start_heartbeat(cx);
+        self.start_keeping(index, cx);
         cx.notify();
         cx.emit(SessionEvent::SignedIn);
+    }
+
+    /// Renews the session of `index` through its hidden page every [`KEEP`], for as long as it
+    /// stays the session signed in. A provider that needs no browser to renew is left alone.
+    fn start_keeping(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.keep_timer = None;
+        if self.providers[index].keeper().is_none() {
+            return;
+        }
+        self.keep_timer = Some(cx.spawn(async move |this, cx| {
+            let mut renewed = std::time::Instant::now();
+            loop {
+                cx.background_executor().timer(KEEP_CHECK).await;
+                let going = this.update(cx, |this, cx| {
+                    let signed_in = matches!(this.state, SessionState::SignedIn(_));
+                    if this.active != Some(index) || !signed_in {
+                        return false;
+                    }
+                    let since = renewed.elapsed();
+                    let lapsed = this.providers[index].lapsed() && since >= KEEP_REST;
+                    if lapsed || since >= KEEP {
+                        renewed = std::time::Instant::now();
+                        this.renew(index, false, cx);
+                    }
+                    true
+                });
+                if !going.unwrap_or(false) {
+                    break;
+                }
+            }
+        }));
+    }
+
+    /// Opens the provider's hidden page in its kept profile, which renews a session that is due,
+    /// and hands the cookies it ends up with to the provider. With `restore`, the stored sign-in
+    /// is opened again afterwards, and a page that brings back no session falls back as the
+    /// refused restore would have.
+    fn renew(&mut self, index: usize, restore: bool, cx: &mut Context<Self>) {
+        let provider = self.providers[index].clone();
+        let Some(keeper) = provider.keeper() else {
+            return;
+        };
+        if self.keeper.is_some() {
+            return;
+        }
+        let target = webview::Target {
+            url: keeper.url.to_string(),
+            landing: keeper.landing.to_string(),
+            domain: keeper.domain.to_string(),
+            proof: keeper.proof.iter().map(ToString::to_string).collect(),
+            title: provider.name().to_string(),
+            agent: keeper.agent.map(str::to_owned),
+            // A script that does nothing keeps the page hidden. WebView2 refuses an empty one.
+            script: Some("void 0;".to_owned()),
+            profile: keeper.profile.map(str::to_owned),
+        };
+        let proof: Vec<String> = target.proof.clone();
+        match webview::Page::open(target) {
+            Ok(page) => self.keeper = Some(page),
+            Err(error) => {
+                log::warn!("session: cannot open the renewal page: {error:#}");
+                if restore {
+                    self.fall_back(index, None, cx);
+                }
+                return;
+            }
+        }
+        log::debug!("session: renewing {} in its kept profile", provider.name());
+        let io = self.io.clone();
+        let began = std::time::Instant::now();
+        self.keeper_task = Some(cx.spawn(async move |this, cx| {
+            let mut found: Option<String> = None;
+            loop {
+                cx.background_executor().timer(WINDOW_POLL).await;
+                let read = this.update(cx, |this, _| {
+                    let page = this.keeper.as_mut()?;
+                    match page.peek() {
+                        webview::Poll::Cookies(header) => Some(Some(header)),
+                        webview::Poll::Closed => Some(None),
+                        webview::Poll::Pending => Some(Some(String::new())),
+                    }
+                });
+                let Ok(Some(read)) = read else {
+                    return;
+                };
+                let proven = read.as_deref().is_some_and(|header| {
+                    header
+                        .split(';')
+                        .filter_map(|pair| pair.trim().split_once('='))
+                        .any(|(name, value)| !value.is_empty() && proof.iter().any(|p| p == name))
+                });
+                let closed = read.is_none();
+                if proven {
+                    found = read;
+                }
+                let settled = began.elapsed() >= KEEP_SETTLE && found.is_some();
+                if closed || settled || began.elapsed() >= KEEP_PATIENCE {
+                    break;
+                }
+            }
+            this.update(cx, |this, _| this.keeper = None).ok();
+            let renewed = match found {
+                Some(header) => {
+                    let provider = provider.clone();
+                    join(io.spawn(async move { provider.renewed(header).await }))
+                        .await
+                        .map_err(|error| format!("{error:#}"))
+                }
+                None => Err("the kept profile holds no session".to_owned()),
+            };
+            this.update(cx, |this, cx| {
+                this.keeper_task = None;
+                match &renewed {
+                    Ok(()) => log::debug!("session: renewed the sign-in in its kept profile"),
+                    Err(error) => log::warn!("session: cannot renew the sign-in: {error}"),
+                }
+                if !restore || this.active != Some(index) {
+                    return;
+                }
+                match renewed {
+                    Ok(()) => this.restore_at(index, cx),
+                    Err(_) => this.fall_back(index, None, cx),
+                }
+            })
+            .ok();
+        }));
     }
 
     fn drop_previous_session(&mut self, cx: &mut Context<Self>) {

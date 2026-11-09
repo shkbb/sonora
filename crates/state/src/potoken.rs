@@ -125,6 +125,7 @@ impl PoToken {
             proof: vec![COOKIE.to_string()],
             title: String::new(),
             agent: None,
+            profile: None,
             script: Some(include_str!("potoken.js").to_string()),
         };
         match webview::Page::open(target) {

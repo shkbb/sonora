@@ -211,6 +211,24 @@ pub trait MusicApi: Send + Sync {
         Ok(())
     }
 
+    /// The videos the provider finds for `query`, for a provider whose catalogue has videos
+    /// apart from its songs. Every other provider keeps the default and finds none.
+    async fn search_videos(&self, _query: &str) -> Result<Vec<Track>> {
+        Ok(Vec::new())
+    }
+
+    /// The other half of a song/video pair: the music video of a song, or the song of a music
+    /// video. A provider without such pairs keeps the default and finds none.
+    async fn counterpart(&self, _track_id: &str) -> Result<Option<Track>> {
+        Ok(None)
+    }
+
+    /// Whether a track is a music video with a picture of its own. A provider that has no
+    /// videos keeps the default and asks nothing.
+    async fn has_video(&self, _track_id: &str) -> Result<bool> {
+        Ok(false)
+    }
+
     /// The picture of a track that is a music video, already arriving. `None` for a track with
     /// no picture of its own, which is every track of a provider that has no videos.
     async fn open_video(&self, _track_id: &str) -> Result<Option<video::VideoStream>> {
@@ -1008,6 +1026,9 @@ pub struct WebSignIn {
     /// WebKit window); the string must match what the backend's engine would say. Backends
     /// whose default is already engine-consistent may ignore it.
     pub agent: Option<&'static str>,
+    /// The browser profile the sign-in is kept in between windows, for a provider whose session
+    /// is bound to the browser that signed in. `None` signs in to a throwaway profile.
+    pub profile: Option<&'static str>,
 }
 
 #[async_trait]
@@ -1087,6 +1108,25 @@ pub trait MusicProvider: Send + Sync {
     /// sign-in, and the app offers no `Secret` option for it.
     fn web_sign_in(&self) -> Option<WebSignIn> {
         None
+    }
+
+    /// A hidden page in the sign-in's kept profile that renews the session when it loads, for a
+    /// provider whose session only the browser that signed in can renew. The header it ends up
+    /// with goes to [`renewed`](Self::renewed).
+    fn keeper(&self) -> Option<WebSignIn> {
+        None
+    }
+
+    /// Whether the open session has just been answered as signed out, so its
+    /// [`keeper`](Self::keeper) page is due now rather than at its next turn.
+    fn lapsed(&self) -> bool {
+        false
+    }
+
+    /// Takes the cookies a [`keeper`](Self::keeper) page ended up with: stores them for the next
+    /// launch and hands them to the session that is open.
+    async fn renewed(&self, _cookies: String) -> Result<()> {
+        Ok(())
     }
 }
 

@@ -36,6 +36,13 @@ const GUEST_ID: &str = "youtube-guest";
 const SIGN_IN_URL: &str = "https://accounts.google.com/ServiceLogin?ltmpl=music&service=youtube&passive=true&continue=https%3A%2F%2Fwww.youtube.com%2Fsignin%3Faction_handle_signin%3Dtrue%26next%3Dhttps%253A%252F%252Fmusic.youtube.com%252F";
 const LANDING: &str = "music.youtube.com";
 const COOKIE_DOMAIN: &str = "youtube.com";
+/// The browser profile the sign-in is kept in. Google binds the session to that profile's key,
+/// so only a page opened in it can renew the session once Google asks for proof.
+const PROFILE: &str = "youtube";
+/// The page the hidden renewal window loads: the sign-in url itself. With the account still in
+/// the kept profile, Google asks nothing and hands YouTube a fresh session on the way back to
+/// YouTube Music, which is more than a load of YouTube Music alone renews.
+const KEEPER_URL: &str = SIGN_IN_URL;
 /// How often a signed-in session asks Google for fresh cookies, the cadence of an open YouTube tab.
 const ROTATION: Duration = Duration::from_secs(10 * 60);
 /// How often the rotation loop looks at the wall clock. A machine that slept past a rotation
@@ -86,6 +93,8 @@ impl ytmusic::Minter for Minter {
 }
 
 pub struct YouTubeProvider {
+    /// The signed-in client open now, which renewed cookies go to.
+    live: std::sync::Mutex<Weak<YtMusic>>,
     credentials: PathBuf,
     /// The cookie store ytmusic writes back to as Google rotates the session. The pasted
     /// header in the credential file seeds it when it is missing.
@@ -99,6 +108,7 @@ impl YouTubeProvider {
         let account = credentials::dir("youtube");
         let cache = credentials::root().join("youtube");
         Self {
+            live: std::sync::Mutex::new(Weak::new()),
             credentials: account.join(credentials::FILE),
             cookies: account.join("cookies.json"),
             resolved: cache.join("resolved.json"),
@@ -148,6 +158,9 @@ impl YouTubeProvider {
     fn authenticated_session(&self, api: Arc<YtMusic>, profile: UserProfile) -> ProviderSession {
         let since = self.rotated_at().unwrap_or_else(SystemTime::now);
         keep_fresh(Arc::downgrade(&api), since);
+        if let Ok(mut live) = self.live.lock() {
+            *live = Arc::downgrade(&api);
+        }
         let client = YouTubeClient::new(api.clone())
             .owned_by(profile.display_name.clone())
             .reporting();
@@ -423,6 +436,43 @@ impl MusicProvider for YouTubeProvider {
             domain: COOKIE_DOMAIN,
             proof: auth::PROOF,
             agent: None,
+            profile: Some(PROFILE),
         })
+    }
+
+    fn keeper(&self) -> Option<WebSignIn> {
+        matches!(self.saved(), Some(Saved::Cookies { .. })).then_some(WebSignIn {
+            url: KEEPER_URL,
+            landing: LANDING,
+            domain: COOKIE_DOMAIN,
+            proof: auth::PROOF,
+            agent: None,
+            profile: Some(PROFILE),
+        })
+    }
+
+    fn lapsed(&self) -> bool {
+        let live = self.live.lock().ok().and_then(|live| live.upgrade());
+        live.is_some_and(|api| !api.signed_in())
+    }
+
+    /// Stores the cookies the kept profile renewed, in place of the rotating store, which only
+    /// knew the old session, and hands them to the client that is open.
+    async fn renewed(&self, cookies: String) -> Result<()> {
+        let cookies = auth::header(&cookies)?;
+        let Some(Saved::Cookies {
+            authuser, page_id, ..
+        }) = self.saved()
+        else {
+            anyhow::bail!("there is no youtube sign-in to renew");
+        };
+        credentials::remove(&self.cookies);
+        self.store_cookies(&cookies, authuser, page_id)?;
+        let live = self.live.lock().ok().and_then(|live| live.upgrade());
+        if let Some(api) = live {
+            api.adopt_cookies(&cookies);
+        }
+        log::debug!("youtube: took the renewed session from the kept profile");
+        Ok(())
     }
 }

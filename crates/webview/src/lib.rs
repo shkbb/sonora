@@ -68,6 +68,11 @@ pub struct Target {
     /// Javascript to run in every page the window loads, before the page's own scripts. A window
     /// with one is a scripted window and is never shown.
     pub script: Option<String>,
+    /// A browser profile kept between windows, by name, instead of a throwaway private one. A
+    /// provider whose session the browser binds to its own key signs in to a kept profile, so
+    /// a later hidden window in the same profile can renew it. Backends without named profiles
+    /// ignore it.
+    pub profile: Option<String>,
 }
 
 impl Target {

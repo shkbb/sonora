@@ -170,6 +170,7 @@ impl MusicProvider for DeezerProvider {
             // Deezer's anti-bot rejects the default Firefox agent on the WebKit window the
             // Linux backend drives; the Safari string matches the engine it actually runs.
             agent: Some(AGENT),
+            profile: None,
         })
     }
 }

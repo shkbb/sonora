@@ -216,6 +216,7 @@ impl MusicProvider for AppleProvider {
             proof: auth::PROOF,
             // Apple's sign-in page is happy with whatever the backend's own engine says.
             agent: None,
+            profile: None,
         })
     }
 }
