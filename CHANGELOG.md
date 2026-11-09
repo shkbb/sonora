@@ -18,6 +18,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A quick flick on a touchpad under Wayland keeps the page scrolling for a moment after your fingers lift.
 - Songs you play from YouTube Music while signed in are reported to YouTube the way its own
   apps report them, so they show up in your YouTube Music history.
+- A Now playing panel beside your library shows the song's cover, a few lines of its lyrics
+  and its artist. Open it from the disc button in the player bar.
+- Watch YouTube Music videos on Windows, in the Now playing panel or filling the fullscreen
+  player. Switch a song to its music video and back with Audio and Video on the cover.
+- Search finds videos on YouTube Music and lists them under the best match.
 
 ### Changed
 
@@ -39,6 +44,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A YouTube Music sign-in made in Sonora's window on Windows no longer drops after a couple of
+  hours. Sonora renews it in the background.
+- A YouTube channel that only uploads videos now shows them on its page instead of an empty one.
+- Artist pictures from YouTube Music are sharp and show the whole portrait instead of a slice of
+  the banner.
 - On macOS, scrolling and clicks no longer lag behind in fullscreen and with lyrics open.
 - Horizontal card rows scroll all the way to the page edges, including album recommendations.
 - Removing an Apple Music song or album from the library takes its like off right away, the way Apple does.

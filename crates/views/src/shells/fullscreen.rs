@@ -98,6 +98,8 @@ pub struct FullscreenView {
     video: Entity<Video>,
     /// The music video's frames, which fill the window while the track has a picture.
     picture: Picture,
+    /// Whether the view is up, so the video is asked for only then.
+    on_screen: bool,
     settings: Entity<AppSettings>,
     aside: Entity<Aside>,
     panel: Option<SideTab>,
@@ -164,6 +166,7 @@ impl FullscreenView {
             cover,
             video,
             picture: Picture::default(),
+            on_screen: false,
             settings,
             aside,
             panel,
@@ -211,8 +214,10 @@ impl FullscreenView {
     /// Starts the idle clock as the view opens and stops it as the view closes, so it never
     /// hides the cursor over the workspace. Either way the view next shows with its controls up.
     pub fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+        self.on_screen = shown;
+        let wanted = shown && self.settings.read(cx).video_mode();
         self.video
-            .update(cx, |video, cx| video.watch(Viewer::Fullscreen, shown, cx));
+            .update(cx, |video, cx| video.watch(Viewer::Fullscreen, wanted, cx));
         self.flip(true);
         self.hidden = SpringState {
             position: 0.,
@@ -1298,8 +1303,14 @@ impl Render for FullscreenView {
         let room = Room::of(viewport.width);
         // A music video fills the window, the way a cinema would, and the controls float over
         // it. The cover column and the side panel step aside for it.
+        // A music video shows only while the switch says Video, and the mode can change while
+        // the view is up.
+        let video_mode = self.settings.read(cx).video_mode();
+        let wanted = self.on_screen && video_mode;
+        self.video
+            .update(cx, |video, cx| video.watch(Viewer::Fullscreen, wanted, cx));
         let frame = self.picture.frame(&self.video, &self.playback, window, cx);
-        let cinema = self.video.read(cx).has_picture();
+        let cinema = video_mode && self.video.read(cx).has_picture();
         let split = !cinema && room.fits(Room::Wide) && self.panel.is_some();
         self.watch(window, cx);
         let idle = self.hidden(window, cx);

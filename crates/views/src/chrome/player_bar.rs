@@ -11,7 +11,7 @@ use gpui::{
 };
 use gpui::{Window, div, px};
 use i18n::t;
-use input::{ShowMembers, ToggleFullscreen, ToggleLyrics, ToggleQueue, ToggleVideo};
+use input::{ShowMembers, ToggleFullscreen, ToggleLyrics, ToggleNowPlaying, ToggleQueue};
 use state::{AppSettings, Playback, PlayerBarLayout, Queue, SideTab, Sonora};
 use ui::{
     Artwork, Button, ExplicitBadge, InlineLink, InlineLinks, Pinnable, Popup, Room, Scrollbar,
@@ -228,7 +228,7 @@ impl PlayerBar {
                         SideTab::Queue => Box::new(ToggleQueue),
                         SideTab::Lyrics => Box::new(ToggleLyrics),
                         SideTab::Members => Box::new(ShowMembers),
-                        SideTab::Video => Box::new(ToggleVideo),
+                        SideTab::NowPlaying => Box::new(ToggleNowPlaying),
                     };
                     window.dispatch_action(action, cx);
                 })
@@ -240,16 +240,16 @@ impl PlayerBar {
             .items_center()
             .gap_1()
             .child(button(
+                "player-now-playing",
+                "icons/disc-3.svg",
+                "now-playing-title",
+                SideTab::NowPlaying,
+            ))
+            .child(button(
                 "player-lyrics",
                 "icons/mic-vocal.svg",
                 "lyrics-title",
                 SideTab::Lyrics,
-            ))
-            .child(button(
-                "player-video",
-                "icons/tv.svg",
-                "video-title",
-                SideTab::Video,
             ))
             .child(button(
                 "player-queue",

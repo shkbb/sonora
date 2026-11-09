@@ -18,6 +18,10 @@ const LINES: usize = 3;
 const DIALOG: f32 = 4.5;
 const BIO_HEIGHT: Pixels = px(360.);
 const FADE: Pixels = px(64.);
+/// How dark the plate under a stacked card's label is.
+const LABEL_PLATE: f32 = 0.55;
+/// The height of a stacked card's photo over its width.
+const STACKED_PHOTO: f32 = 0.66;
 
 type Open = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
@@ -28,6 +32,10 @@ pub(crate) struct AboutArtist {
     cover: Option<String>,
     biography: Option<String>,
     on_open: Option<Open>,
+    /// The width of a card laid out tall for a narrow column, with the photo across its top.
+    stacked: Option<Pixels>,
+    /// Whether the stacked photo is a square portrait, shown whole, rather than a wide banner.
+    square: bool,
 }
 
 impl AboutArtist {
@@ -38,6 +46,8 @@ impl AboutArtist {
             cover: None,
             biography: None,
             on_open: None,
+            stacked: None,
+            square: false,
         }
     }
 
@@ -48,6 +58,19 @@ impl AboutArtist {
 
     pub(crate) fn biography(mut self, biography: Option<String>) -> Self {
         self.biography = biography;
+        self
+    }
+
+    /// Lays the card out tall, `width` wide, with the photo across its top, for a column too
+    /// narrow for the portrait beside the text.
+    pub(crate) fn stacked(mut self, width: Pixels) -> Self {
+        self.stacked = Some(width);
+        self
+    }
+
+    /// Shows a stacked card's photo whole as a square, for a portrait with no banner beside it.
+    pub(crate) fn square(mut self, square: bool) -> Self {
+        self.square = square;
         self
     }
 
@@ -66,6 +89,66 @@ impl RenderOnce for AboutArtist {
         let pressable = self.on_open.is_some();
         let name = self.name.clone();
         let about = blurb(self.biography);
+        if let Some(width) = self.stacked {
+            return div()
+                .id(self.id)
+                .role(match pressable {
+                    true => Role::Button,
+                    false => Role::Group,
+                })
+                .aria_label(name)
+                .aria_description(about.clone())
+                .flex()
+                .flex_col()
+                .rounded(theme.radius * 2.)
+                .overflow_hidden()
+                .bg(theme.secondary)
+                .when_some(self.on_open, |this, open| {
+                    this.cursor_pointer()
+                        .hover(|style| style.bg(theme.secondary_hover))
+                        .on_click(move |event, window, cx| open(event, window, cx))
+                })
+                .child(
+                    div()
+                        .relative()
+                        .child(Artwork::new(self.cover).size(width.max(px(1.))).wide(
+                            match self.square {
+                                true => width,
+                                false => width * STACKED_PHOTO,
+                            },
+                        ))
+                        .child(
+                            div()
+                                .absolute()
+                                .top(theme.metrics.pad)
+                                .left(theme.metrics.pad)
+                                .px_2()
+                                .py_1()
+                                .rounded(theme.radius)
+                                // A plate under the label, which a bright photo would wash out.
+                                .bg(gpui::black().opacity(LABEL_PLATE))
+                                .child(eyebrow(t!("artist-about"), cx)),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .p_4()
+                        .child(heading(self.name, cx).min_w_0().truncate())
+                        .child(
+                            div()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .line_clamp(LINES)
+                                .text_ellipsis()
+                                .text_color(theme.muted_foreground)
+                                .child(about),
+                        ),
+                )
+                .into_any_element();
+        }
 
         div()
             .id(self.id)
@@ -109,6 +192,7 @@ impl RenderOnce for AboutArtist {
                             .child(about),
                     ),
             )
+            .into_any_element()
     }
 }
 

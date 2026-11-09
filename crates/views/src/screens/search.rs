@@ -31,6 +31,8 @@ use crate::shared::pins::Pinned as _;
 use crate::shared::shelves;
 use crate::shared::trouble;
 
+/// How large a video's still is asked for on the search rail.
+const VIDEO_STILL: u32 = 720;
 const RAIL: Pixels = gpui::px(12.);
 /// How tall the band is where results fade out as they scroll up under what sits above them.
 const FADE: Pixels = gpui::px(12.);
@@ -136,6 +138,9 @@ pub(crate) struct SearchView {
     cursor: Option<(usize, usize)>,
     rows: [usize; 3],
     lead: Rc<Cell<Pixels>>,
+    /// The rail of videos under the best match, for a provider that finds videos.
+    videos: shelves::Rail,
+    me: gpui::WeakEntity<Self>,
 }
 
 impl SearchView {
@@ -238,6 +243,8 @@ impl SearchView {
             cursor: None,
             rows: [0; 3],
             lead: Rc::new(Cell::new(Pixels::ZERO)),
+            videos: shelves::Rail::new(cx.entity_id()),
+            me: cx.entity().downgrade(),
         }
     }
 
@@ -1116,6 +1123,66 @@ impl SearchView {
         self.shell(id, title, body, RAIL, cx)
     }
 
+    /// The videos found for the query on a rail of cards, with each still asked for large.
+    fn video_rail(
+        &self,
+        width: Pixels,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let found = self.search.read(cx).videos();
+        if found.is_empty() {
+            return None;
+        }
+        let videos: Rc<Vec<music::Track>> = Rc::new(
+            found
+                .iter()
+                .cloned()
+                .map(|mut video| {
+                    video.cover = video
+                        .cover
+                        .map(|cover| music::artwork::larger(&cover, VIDEO_STILL));
+                    video
+                })
+                .collect(),
+        );
+        let grid = crate::shared::album_grid::CardGrid::layout(width);
+        let card = grid.card;
+        let count = videos.len();
+        let weak = self.me.clone();
+        let notify: Rc<dyn Fn(&mut App)> = Rc::new(move |cx: &mut App| {
+            weak.update(cx, |_, cx| cx.notify()).ok();
+        });
+        let playback = self.playback.clone();
+        self.videos.sync();
+        Some(self.videos.render(
+            shelves::RailSpec {
+                tag: "search-videos",
+                place: 0,
+                title: t!("search-videos"),
+                count,
+                tile: card,
+                columns: grid.columns.max(1),
+                tabs: None,
+            },
+            window,
+            cx,
+            &notify,
+            move |index, _, cx| {
+                crate::shared::track_card::TrackCard::new(
+                    "search-video",
+                    index,
+                    videos.clone(),
+                    playback.clone(),
+                )
+                .render(cx)
+                .tile(card)
+                .flat()
+                .into_any_element()
+            },
+        ))
+    }
+
     fn browse(&self, gutter: Pixels, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let found = self.genres.read(cx).genres();
         let theme = *cx.theme();
@@ -1548,6 +1615,12 @@ impl Render for SearchView {
             .child(self.field(gutter, window, cx))
             .when(!stacked, |this| {
                 this.children(self.best(cx).map(|best| div().px(gutter).child(best)))
+            })
+            .when(asked && !stacked, |this| {
+                this.children(
+                    self.video_rail(width - inset * 2., window, cx)
+                        .map(|rail| div().flex_none().px(gutter).child(rail)),
+                )
             })
             .child(results)
             .when_some(context_menu, |this, menu| this.child(menu))

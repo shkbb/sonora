@@ -3,8 +3,8 @@ use gpui::{App, Font, FontFallbacks, SharedString, StyleRefinement, font, prelud
 use gpui::{Window, div};
 use input::{
     CloseWindow, MinimizeWindow, NavigateBack, NavigateForward, OpenFilter, OpenSearch,
-    OpenSettings, Refresh, ShowMembers, ToggleFullscreen, ToggleLyrics, ToggleQueue, ToggleVideo,
-    ToggleWindowFullscreen, ZoomWindow,
+    OpenSettings, Refresh, ShowAudio, ShowMembers, ShowVideo, ToggleFullscreen, ToggleLyrics,
+    ToggleNowPlaying, ToggleQueue, ToggleWindowFullscreen, ZoomWindow,
 };
 use router::{Destination, NavigationEvent, Screen, back, forward, navigate};
 use state::{
@@ -488,6 +488,30 @@ impl Root {
         self.shells
             .workspace
             .update(cx, |workspace, cx| workspace.show_side(tab, cx));
+    }
+
+    /// Plays a music video as its video or as its sound alone. The video shows in the Now
+    /// Playing tab, which opens for it unless the fullscreen player already shows it.
+    fn set_video_mode(&self, video: bool, cx: &mut Context<Self>) {
+        let sonora = Sonora::global(cx);
+        let (settings, watched, playback) = (
+            sonora.settings.clone(),
+            sonora.video.clone(),
+            sonora.playback.clone(),
+        );
+        settings.update(cx, |settings, cx| settings.set_video_mode(video, cx));
+        // A song switched to video plays its music video in its place, and a music video
+        // switched to audio plays its song, from the same moment, the way YouTube Music does.
+        let (is_video, other) = {
+            let watched = watched.read(cx);
+            (watched.has_video(), watched.counterpart().cloned())
+        };
+        if let Some(other) = other.filter(|_| video != is_video) {
+            playback.update(cx, |playback, cx| playback.swap(other, cx));
+        }
+        if video && !matches!(self.view, RootView::Fullscreen) {
+            self.reveal_side(SideTab::NowPlaying, cx);
+        }
     }
 
     /// Opens the right sidebar on `tab`, leaving it be when it already shows there.
@@ -1233,9 +1257,11 @@ impl Render for Root {
             .on_action(
                 cx.listener(|this, _: &ToggleLyrics, _, cx| this.show_side(SideTab::Lyrics, cx)),
             )
-            .on_action(
-                cx.listener(|this, _: &ToggleVideo, _, cx| this.show_side(SideTab::Video, cx)),
-            )
+            .on_action(cx.listener(|this, _: &ToggleNowPlaying, _, cx| {
+                this.show_side(SideTab::NowPlaying, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ShowVideo, _, cx| this.set_video_mode(true, cx)))
+            .on_action(cx.listener(|this, _: &ShowAudio, _, cx| this.set_video_mode(false, cx)))
             .on_action(
                 cx.listener(|this, _: &ShowMembers, _, cx| this.reveal_side(SideTab::Members, cx)),
             )

@@ -22,9 +22,9 @@ use state::{
 };
 use ui::{
     ActiveTheme as _, Avatar, Button, Card, DraggedPin, Edge, Initials, Motion, Motioned as _,
-    PREFETCH_REACH, Pin, Pinnable as _, Popup, Scrollbar, Scroller, Spot, Springs, TabBar,
-    Tails as _, Text, Vacancy, drop_gap, drop_marker, ease_out_cubic, ease_out_expo, eyebrow,
-    faint, mix, prefetch, snapped, vacant,
+    PREFETCH_REACH, Pin, Pinnable as _, Popup, Scrollbar, Scroller, Spot, Springs, Tails as _,
+    Text, Vacancy, drop_gap, drop_marker, ease_out_cubic, ease_out_expo, eyebrow, faint, mix,
+    prefetch, snapped, vacant,
 };
 use unicode_bidi::{BidiClass, Direction};
 
@@ -216,9 +216,6 @@ pub(crate) struct Aside {
     queue_track: Option<String>,
     anchor: bool,
     titled: bool,
-    /// Whether the header switches between the lyrics and the queue rather than naming the
-    /// one shown, for an aside embedded under the music video.
-    tabbed: bool,
     aiming: bool,
     rested: Option<Pixels>,
     since: std::time::Instant,
@@ -323,7 +320,6 @@ impl Aside {
             queue_track: None,
             anchor: true,
             titled: true,
-            tabbed: false,
             aiming: false,
             rested: None,
             since: std::time::Instant::now(),
@@ -367,43 +363,13 @@ impl Aside {
         self.titled = false;
     }
 
-    /// Puts a switch between the lyrics and the queue where the header names the tab.
-    pub(crate) fn tabbed(&mut self) {
-        self.tabbed = true;
-    }
-
-    /// The lyrics and queue switch of a tabbed aside's header.
-    fn switch(&self, cx: &mut Context<Self>) -> TabBar {
-        let theme = *cx.theme();
-        let tab = |id: &'static str, label: SharedString, tab: SideTab| {
-            let showing = self.tab == tab;
-            Button::new(id)
-                .ghost()
-                .small()
-                .label(label)
-                .selected(showing)
-                .rounded(theme.radius)
-                .tint(match showing {
-                    true => theme.foreground,
-                    false => theme.muted_foreground,
-                })
-                .on_click(cx.listener(move |this, _, _, cx| this.show(tab, cx)))
-        };
-        TabBar::new("aside-switch")
-            .name(t!("fullscreen-panels"))
-            .items([
-                tab("aside-switch-lyrics", t!("lyrics-title"), SideTab::Lyrics),
-                tab("aside-switch-queue", t!("queue-title"), SideTab::Queue),
-            ])
-    }
-
     /// Whether the pointer is parked on the panel's scrollbar. Fullscreen
     /// reads this to keep its chrome awake while the reader holds it.
     pub(crate) fn scrollbar_active(&self, cx: &App) -> bool {
         match self.tab {
             SideTab::Lyrics => self.verse_bar.read(cx).hovered(),
             // the members are never drawn here, but by `Members`
-            SideTab::Members | SideTab::Video => false,
+            SideTab::Members | SideTab::NowPlaying => false,
             SideTab::Queue => self.scrollbar.read(cx).hovered(),
         }
     }
@@ -873,18 +839,13 @@ impl Aside {
             .gap_2()
             .h(snapped(theme.metrics.header, window))
             .px_2()
-            .when(self.titled && self.tabbed, |this| {
-                this.border_b_1()
-                    .border_color(theme.border)
-                    .child(self.switch(cx))
-            })
-            .when(self.titled && !self.tabbed, |this| {
+            .when(self.titled, |this| {
                 this.border_b_1().border_color(theme.border).child(eyebrow(
                     match self.tab {
                         SideTab::Queue => t!("queue-title"),
                         SideTab::Lyrics => t!("lyrics-title"),
                         SideTab::Members => t!("members-title"),
-                        SideTab::Video => t!("video-title"),
+                        SideTab::NowPlaying => t!("now-playing-title"),
                     },
                     cx,
                 ))
@@ -2037,7 +1998,7 @@ impl Render for Aside {
                 SideTab::Queue => t!("queue-title"),
                 SideTab::Lyrics => t!("lyrics-title"),
                 SideTab::Members => t!("members-title"),
-                SideTab::Video => t!("video-title"),
+                SideTab::NowPlaying => t!("now-playing-title"),
             })
             .flex()
             .flex_col()
