@@ -134,6 +134,8 @@ pub struct Search {
     catalog: Catalog,
     portraits: HashMap<String, String>,
     hits: Vec<Hit>,
+    /// The videos found for the query, which the page shows on a rail of their own.
+    videos: Vec<Track>,
     loading: bool,
     error: Option<String>,
     session: Entity<Session>,
@@ -172,6 +174,7 @@ impl Search {
             catalog: Catalog::default(),
             portraits: HashMap::new(),
             hits: Vec::new(),
+            videos: Vec::new(),
             loading: false,
             error: None,
             session,
@@ -194,6 +197,10 @@ impl Search {
         self.hits.iter().filter(move |hit| hit.kind() == kind)
     }
 
+    pub fn videos(&self) -> &[Track] {
+        &self.videos
+    }
+
     pub fn best(&self) -> Option<&Hit> {
         self.hits.first()
     }
@@ -214,6 +221,7 @@ impl Search {
         self.catalog.clear();
         self.portraits.clear();
         self.hits.clear();
+        self.videos.clear();
         self.loading = false;
         self.error = None;
     }
@@ -230,6 +238,7 @@ impl Search {
         if query.is_empty() {
             self.task = None;
             self.catalog.clear();
+            self.videos.clear();
             self.served = Some(String::new());
             self.loading = false;
             self.rank(cx);
@@ -266,6 +275,11 @@ impl Search {
                 let asked = query.clone();
                 io.spawn(async move { client.search_playlists(&asked).await })
             };
+            let videos = {
+                let client = client.clone();
+                let asked = query.clone();
+                io.spawn(async move { client.search_videos(&asked).await })
+            };
             let asked = query.clone();
             let artists = io.spawn(async move { client.search_artists(&asked).await });
             let (songs, albums, playlists, artists) = (
@@ -274,12 +288,17 @@ impl Search {
                 join(playlists).await,
                 join(artists).await,
             );
+            let videos = join(videos).await;
 
             this.update(cx, |this, cx| {
                 if this.query != query {
                     return;
                 }
                 this.loading = false;
+                match videos {
+                    Ok(found) => this.videos = found,
+                    Err(error) => log::warn!("search: cannot find videos: {error:#}"),
+                }
 
                 // a part that failed keeps what it showed before, so a refused request
                 // never blanks the page; the query counts as served only once every part

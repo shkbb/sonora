@@ -177,8 +177,9 @@ pub enum SideTab {
     Lyrics,
     /// The people in the Sonora Session or Spotify Jam the listener is in.
     Members,
-    /// The picture of the music video playing.
-    Video,
+    /// The song playing: its cover or music video, its lyrics and its artist.
+    #[serde(rename = "now-playing")]
+    NowPlaying,
 }
 
 impl SideTab {
@@ -683,6 +684,8 @@ struct StateValues {
     sidebar_right_width: f32,
     sidebar_right_open: bool,
     sidebar_right_tab: SideTab,
+    /// Whether a music video plays as its video rather than as its sound alone.
+    video_mode: bool,
     fullscreen_tab: Option<SideTab>,
     shuffle: bool,
     repeat: Repeat,
@@ -715,6 +718,7 @@ impl Default for StateValues {
             sidebar_right_width: DEFAULT_SIDEBAR_RIGHT_WIDTH,
             sidebar_right_open: false,
             sidebar_right_tab: SideTab::Queue,
+            video_mode: false,
             fullscreen_tab: Some(SideTab::Lyrics),
             shuffle: false,
             repeat: Repeat::Off,
@@ -1219,6 +1223,18 @@ impl AppSettings {
 
     pub fn sidebar_right_tab(&self) -> SideTab {
         self.state.sidebar_right_tab
+    }
+
+    pub fn video_mode(&self) -> bool {
+        self.state.video_mode
+    }
+
+    pub fn set_video_mode(&mut self, video: bool, cx: &mut Context<Self>) {
+        if self.state.video_mode == video {
+            return;
+        }
+        self.state.video_mode = video;
+        self.schedule_state_save(cx);
     }
 
     /// The panel the fullscreen view last showed beside the cover, or `None` when it showed the

@@ -791,6 +791,23 @@ impl Playback {
         )
     }
 
+    /// Plays `track` in place of the track playing, from where that one is, for the other half
+    /// of a song/video pair. The queue keeps its place, so the next track is the same.
+    pub fn swap(&mut self, track: Track, cx: &mut Context<Self>) {
+        let at = self.live_position();
+        let at = match track.duration.is_zero() {
+            true => at,
+            false => at.min(track.duration),
+        };
+        let resume = self.wants_playing();
+        self.queue
+            .update(cx, |queue, cx| queue.replace_current(track.clone(), cx));
+        self.load_from(&track, at, Start::Pick, cx);
+        if !resume {
+            self.pause(cx);
+        }
+    }
+
     /// Plays a track the user picked, from its start.
     pub fn play(&mut self, track: &Track, cx: &mut Context<Self>) {
         self.load_after(track, Start::Pick, cx);

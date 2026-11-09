@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use gpui::{App, Context, Entity, RenderImage, Task};
+use music::Track as Song;
 use video::fmp4::{self, Fragment, Track};
 
 use crate::{Io, Playback, PlaybackState, Session, join};
@@ -35,6 +36,14 @@ pub struct Video {
     viewers: u8,
     /// The track whose picture is loaded or being looked for.
     following: Option<String>,
+    /// Whether the track followed is a music video, `None` while that is being asked.
+    kind: Option<bool>,
+    /// The other half of the track followed, its music video or its song, once found.
+    counterpart: Option<Song>,
+    pairing: Option<Task<()>>,
+    checking: Option<Task<()>>,
+    /// Whether opening the picture of the track followed failed, so it is not asked again.
+    failed: bool,
     pipeline: Option<Pipeline>,
     opening: Option<Task<()>>,
 }
@@ -92,6 +101,11 @@ impl Video {
             io,
             viewers: 0,
             following: None,
+            kind: None,
+            counterpart: None,
+            pairing: None,
+            checking: None,
+            failed: false,
             pipeline: None,
             opening: None,
         }
@@ -104,13 +118,13 @@ impl Video {
             true => self.viewers | viewer as u8,
             false => self.viewers & !(viewer as u8),
         };
-        if (viewers == 0) == (self.viewers == 0) {
-            self.viewers = viewers;
-            return;
-        }
         self.viewers = viewers;
-        self.following = None;
-        self.follow(cx);
+        self.open(cx);
+    }
+
+    /// Whether the track playing is a music video, so it can be watched.
+    pub fn has_video(&self) -> bool {
+        self.kind == Some(true)
     }
 
     /// Whether the picture of the track playing is still being looked for.
@@ -159,25 +173,105 @@ impl Video {
     }
 
     /// Loads the picture of the track playing when one is wanted, and drops any other.
+    /// Follows the track playing: learns whether it is a music video, and opens its picture
+    /// once it is one and a view wants it. A picture already open stays open for as long as its
+    /// track plays, so a view that hides and comes back shows it again at once.
     fn follow(&mut self, cx: &mut Context<Self>) {
         let playback = self.playback.read(cx);
         let id = playback
             .track()
             .and_then(|track| track.id.clone())
-            .filter(|_| self.viewers != 0)
             .filter(|id| !music::is_local_id(id));
         let stopped = matches!(
             playback.state(),
             PlaybackState::Idle | PlaybackState::Failed(_)
         );
-        if id == self.following && !stopped {
+        let id = id.filter(|_| !stopped);
+        if id != self.following {
+            self.following = id.clone();
+            self.kind = None;
+            self.counterpart = None;
+            self.pairing = None;
+            self.failed = false;
+            self.pipeline = None;
+            self.opening = None;
+            self.checking = None;
+            cx.notify();
+            if let Some(id) = id {
+                self.check(id.clone(), cx);
+                self.pair(id, cx);
+            }
             return;
         }
-        self.following = id.clone();
-        self.pipeline = None;
-        self.opening = None;
-        cx.notify();
-        let Some(id) = id.filter(|_| !stopped) else {
+        self.open(cx);
+    }
+
+    /// The other half of the track playing, its music video or its song, once found.
+    pub fn counterpart(&self) -> Option<&Song> {
+        self.counterpart.as_ref()
+    }
+
+    /// Looks for the other half of `id`, so the switch can move between a song and its video.
+    fn pair(&mut self, id: String, cx: &mut Context<Self>) {
+        let Some(client) = self.session.read(cx).client() else {
+            return;
+        };
+        let asking = self.io.spawn({
+            let id = id.clone();
+            async move { client.counterpart(&id).await }
+        });
+        self.pairing = Some(cx.spawn(async move |this, cx| {
+            let answer = join(asking).await;
+            this.update(cx, |this, cx| {
+                this.pairing = None;
+                if this.following.as_deref() != Some(id.as_str()) {
+                    return;
+                }
+                match answer {
+                    Ok(found) => this.counterpart = found,
+                    Err(error) => log::debug!("video: no other half of {id}: {error:#}"),
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
+    /// Asks the provider whether `id` is a music video.
+    fn check(&mut self, id: String, cx: &mut Context<Self>) {
+        let Some(client) = self.session.read(cx).client() else {
+            return;
+        };
+        let asking = self.io.spawn({
+            let id = id.clone();
+            async move { client.has_video(&id).await }
+        });
+        self.checking = Some(cx.spawn(async move |this, cx| {
+            let answer = join(asking).await;
+            this.update(cx, |this, cx| {
+                this.checking = None;
+                if this.following.as_deref() != Some(id.as_str()) {
+                    return;
+                }
+                this.kind = Some(answer.unwrap_or_else(|error| {
+                    log::warn!("video: cannot tell whether {id} is a video: {error:#}");
+                    false
+                }));
+                cx.notify();
+                this.open(cx);
+            })
+            .ok();
+        }));
+    }
+
+    /// Opens the picture of the track followed, when it has one, a view wants it, and it is not
+    /// open, opening or refused already.
+    fn open(&mut self, cx: &mut Context<Self>) {
+        let wanted = self.viewers != 0 && self.kind == Some(true) && !self.failed;
+        if !wanted || self.pipeline.is_some() || self.opening.is_some() {
+            return;
+        }
+        let Some(id) = self.following.clone() else {
             return;
         };
         let Some(client) = self.session.read(cx).client() else {
@@ -202,11 +296,17 @@ impl Video {
                         let pipeline = Pipeline::start(stream, &io);
                         pipeline.to_worker.send(Feed::Seek(position)).ok();
                         this.pipeline = Some(pipeline);
-                        cx.notify();
                     }
-                    Ok(None) => log::debug!("video: {id} has no picture of its own"),
-                    Err(error) => log::warn!("video: cannot open the picture of {id}: {error:#}"),
+                    Ok(None) => {
+                        log::debug!("video: {id} has no picture of its own");
+                        this.failed = true;
+                    }
+                    Err(error) => {
+                        log::warn!("video: cannot open the picture of {id}: {error:#}");
+                        this.failed = true;
+                    }
                 }
+                cx.notify();
             })
             .ok();
         }));

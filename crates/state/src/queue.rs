@@ -609,6 +609,16 @@ impl Queue {
         self.past.iter().map(|entry| entry.track.as_ref())
     }
 
+    /// Puts `track` in place of the track playing, keeping where it sits and what it was
+    /// queued from, for the other half of a song/video pair.
+    pub fn replace_current(&mut self, track: Track, cx: &mut Context<Self>) {
+        let Some(entry) = self.current.as_mut() else {
+            return;
+        };
+        entry.track = Rc::new(track);
+        self.changed(cx);
+    }
+
     pub fn current(&self) -> Option<&Track> {
         self.current.as_ref().map(|entry| entry.track.as_ref())
     }
