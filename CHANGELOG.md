@@ -47,6 +47,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A YouTube Music sign-in made in Sonora's window on Windows no longer drops after a couple of
   hours. Sonora renews it in the background.
 - A YouTube channel that only uploads videos now shows them on its page instead of an empty one.
+- Panel sizes, pins and the queue are kept when one saved value cannot be read, as after running
+  another version of Sonora, instead of everything going back to its defaults.
 - Artist pictures from YouTube Music are sharp and show the whole portrait instead of a slice of
   the banner.
 - On macOS, scrolling and clicks no longer lag behind in fullscreen and with lyrics open.

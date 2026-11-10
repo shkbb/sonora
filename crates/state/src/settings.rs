@@ -684,6 +684,10 @@ struct StateValues {
     sidebar_right_width: f32,
     sidebar_right_open: bool,
     sidebar_right_tab: SideTab,
+    /// Whether the right sidebar shows Now Playing rather than `sidebar_right_tab`. It is kept
+    /// apart from the tab so that a Sonora without Now Playing still reads the tab: one value
+    /// it cannot read costs it the whole saved state, panel sizes included.
+    sidebar_right_now_playing: bool,
     /// Whether a music video plays as its video rather than as its sound alone.
     video_mode: bool,
     fullscreen_tab: Option<SideTab>,
@@ -718,6 +722,7 @@ impl Default for StateValues {
             sidebar_right_width: DEFAULT_SIDEBAR_RIGHT_WIDTH,
             sidebar_right_open: false,
             sidebar_right_tab: SideTab::Queue,
+            sidebar_right_now_playing: false,
             video_mode: false,
             fullscreen_tab: Some(SideTab::Lyrics),
             shuffle: false,
@@ -784,9 +789,7 @@ impl StateStore {
                 .optional()
                 .context("cannot read app state")
         })?;
-        encoded
-            .map(|encoded| serde_json::from_str(&encoded).context("cannot decode app state"))
-            .transpose()
+        encoded.map(|encoded| decode(&encoded)).transpose()
     }
 
     fn save(&self, state: &StateValues) -> Result<()> {
@@ -917,7 +920,7 @@ impl AppSettings {
             }
         };
 
-        let state = match store.load() {
+        let mut state = match store.load() {
             Ok(Some(saved)) => saved,
             Ok(None) => StateValues::default(),
             Err(error) => {
@@ -925,6 +928,11 @@ impl AppSettings {
                 StateValues::default()
             }
         };
+        // A state saved before Now Playing had its own flag named it as the tab.
+        if state.sidebar_right_tab == SideTab::NowPlaying {
+            state.sidebar_right_tab = SideTab::Queue;
+            state.sidebar_right_now_playing = true;
+        }
         let themes = themes::load(&themes_path(&path), &[]).themes;
         let families = themes::catalog(&themes);
 
@@ -1222,7 +1230,10 @@ impl AppSettings {
     }
 
     pub fn sidebar_right_tab(&self) -> SideTab {
-        self.state.sidebar_right_tab
+        match self.state.sidebar_right_now_playing {
+            true => SideTab::NowPlaying,
+            false => self.state.sidebar_right_tab,
+        }
     }
 
     pub fn video_mode(&self) -> bool {
@@ -1950,10 +1961,16 @@ impl AppSettings {
     }
 
     pub fn set_sidebar_right_tab(&mut self, tab: SideTab, cx: &mut Context<Self>) {
-        if self.state.sidebar_right_tab == tab {
+        if self.sidebar_right_tab() == tab {
             return;
         }
-        self.state.sidebar_right_tab = tab;
+        match tab {
+            SideTab::NowPlaying => self.state.sidebar_right_now_playing = true,
+            tab => {
+                self.state.sidebar_right_now_playing = false;
+                self.state.sidebar_right_tab = tab;
+            }
+        }
         self.schedule_state_save(cx);
     }
 
@@ -3038,6 +3055,30 @@ fn place_lyrics_provider(
         order[index] = name;
     }
     true
+}
+
+/// Decodes the saved runtime state. A value this build cannot read, as one written by another
+/// version of the app, costs only its own field, which falls back to its default. Everything
+/// else, the panel sizes included, is kept.
+fn decode(encoded: &str) -> Result<StateValues> {
+    if let Ok(state) = serde_json::from_str(encoded) {
+        return Ok(state);
+    }
+    let saved: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(encoded).context("cannot decode app state")?;
+    let mut kept = serde_json::Map::new();
+    for (key, value) in saved {
+        let alone = serde_json::Map::from_iter([(key.clone(), value.clone())]);
+        match serde_json::from_value::<StateValues>(serde_json::Value::Object(alone)) {
+            Ok(_) => {
+                kept.insert(key, value);
+            }
+            Err(error) => {
+                log::warn!("settings: the saved {key} does not read and is left out: {error}")
+            }
+        }
+    }
+    serde_json::from_value(serde_json::Value::Object(kept)).context("cannot decode app state")
 }
 
 #[cfg(test)]
