@@ -23,6 +23,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Watch YouTube Music videos on Windows, in the Now playing panel or filling the fullscreen
   player. Switch a song to its music video and back with Audio and Video on the cover.
 - Search finds videos on YouTube Music and lists them under the best match.
+- A music video starts from where the song is within about a second, and seeking in one is
+  quick, however long the video.
 
 ### Changed
 

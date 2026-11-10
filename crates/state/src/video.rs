@@ -7,6 +7,7 @@
 //! drags behind. A jump in the position tells the worker to seek.
 
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -14,7 +15,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use gpui::{App, Context, Entity, RenderImage, Task};
 use music::Track as Song;
-use video::fmp4::{self, Fragment, Track};
+use video::fmp4::{self, Fragment, Segment, Track};
 
 use crate::{Io, Playback, PlaybackState, Session, join};
 
@@ -25,6 +26,15 @@ const AHEAD: usize = 8;
 const JUMP: Duration = Duration::from_millis(1500);
 /// How long the worker waits for bytes or room before it looks at its messages again.
 const IDLE: Duration = Duration::from_millis(10);
+/// How long a download that is far enough ahead rests before it looks again.
+const PAUSE: Duration = Duration::from_millis(100);
+/// How far past the bytes in hand a seek target may sit and still be waited for. Past this,
+/// the download starts over at the target instead.
+const NEAR: usize = 2 * 1024 * 1024;
+/// How many bytes of the file the download keeps ahead of decoding.
+const AHEAD_BYTES: usize = 12 * 1024 * 1024;
+/// How many decoded segments are kept behind playback, for a short seek back.
+const BEHIND: usize = 2;
 
 /// Follows the playing track and keeps its picture decoded ahead of the sound.
 pub struct Video {
@@ -79,12 +89,17 @@ struct Shelf {
 
 /// What reaches the worker.
 enum Feed {
-    Bytes(Bytes),
-    /// Every byte has arrived.
-    End,
+    /// The next bytes of the download numbered by its lap, in file order from where it began.
+    Bytes(u64, Bytes),
+    /// The download of this lap reached the end of the file.
+    End(u64),
     /// Playback moved to this position.
     Seek(Duration),
 }
+
+/// Where the worker sends the download next: the number of the new lap and the byte of the
+/// file it starts at.
+type Moves = tokio::sync::mpsc::UnboundedSender<(u64, u64)>;
 
 impl Video {
     pub fn new(
@@ -318,32 +333,21 @@ impl Pipeline {
     fn start(stream: music::video::VideoStream, io: &Io) -> Self {
         let shelf = Arc::new(Mutex::new(Shelf::default()));
         let (to_worker, from_feed) = mpsc::channel();
-        let feed = to_worker.clone();
-        let mut body = stream.body;
+        let (moves, moved) = tokio::sync::mpsc::unbounded_channel();
+        let limit = Arc::new(AtomicU64::new(u64::MAX));
         let download = io
-            .spawn(async move {
-                loop {
-                    match body.chunk().await {
-                        Ok(Some(bytes)) => {
-                            if feed.send(Feed::Bytes(bytes)).is_err() {
-                                return;
-                            }
-                        }
-                        Ok(None) => break,
-                        Err(error) => {
-                            log::warn!("video: the download broke off: {error:#}");
-                            break;
-                        }
-                    }
-                }
-                feed.send(Feed::End).ok();
-            })
+            .spawn(download(
+                stream.body,
+                to_worker.clone(),
+                moved,
+                limit.clone(),
+            ))
             .abort_handle();
         let worker_shelf = shelf.clone();
         std::thread::Builder::new()
             .name("video".into())
             .spawn(move || {
-                if let Err(error) = Worker::new(worker_shelf).run(from_feed) {
+                if let Err(error) = Worker::new(worker_shelf, moves, limit).run(from_feed) {
                     log::warn!("video: decoding stopped: {error:#}");
                 }
             })
@@ -364,35 +368,100 @@ impl Drop for Pipeline {
     }
 }
 
-/// The decoding thread's state: the bytes so far, the fragments found in them and where
-/// decoding has got to.
+/// Reads the body in file order and hands it to the worker. It starts over wherever the worker
+/// sends it, and rests while it is `limit` bytes into the file, which is as far ahead of
+/// decoding as the worker wants it.
+async fn download(
+    mut body: Box<dyn music::video::VideoBody>,
+    feed: Sender<Feed>,
+    mut moved: tokio::sync::mpsc::UnboundedReceiver<(u64, u64)>,
+    limit: Arc<AtomicU64>,
+) {
+    let (mut lap, mut offset, mut ended) = (0u64, 0u64, false);
+    loop {
+        let resting = ended || offset >= limit.load(Ordering::Relaxed);
+        tokio::select! {
+            biased;
+            to = moved.recv() => {
+                let Some((next, at)) = to else {
+                    return;
+                };
+                body.seek(at);
+                (lap, offset, ended) = (next, at, false);
+            }
+            _ = tokio::time::sleep(PAUSE), if resting => {}
+            chunk = body.chunk(), if !resting => match chunk {
+                Ok(Some(bytes)) => {
+                    offset += bytes.len() as u64;
+                    if feed.send(Feed::Bytes(lap, bytes)).is_err() {
+                        return;
+                    }
+                }
+                Ok(None) => {
+                    ended = true;
+                    if feed.send(Feed::End(lap)).is_err() {
+                        return;
+                    }
+                }
+                Err(error) => {
+                    log::warn!("video: the download broke off: {error:#}");
+                    ended = true;
+                }
+            },
+        }
+    }
+}
+
+/// The decoding thread's state: the stretch of the file in hand, the fragments found in it and
+/// where decoding has got to.
 struct Worker {
     shelf: Arc<Mutex<Shelf>>,
+    moves: Moves,
+    /// How far into the file the download may read, kept a little ahead of decoding.
+    limit: Arc<AtomicU64>,
+    /// The number of the download whose bytes are taken. Bytes of an earlier one that were
+    /// still on their way when it was sent elsewhere are dropped.
+    lap: u64,
+    /// The byte of the file `data` starts at.
+    base: usize,
     data: Vec<u8>,
     ended: bool,
     track: Option<Track>,
     decoder: Option<video::Decoder>,
+    /// The file's own index of its segments, empty when it has none.
+    index: Vec<Segment>,
+    /// Which segment of the index `fragments` starts at.
+    first: usize,
     fragments: Vec<Fragment>,
-    /// Where the next fragment starts once its bytes arrive.
+    /// Where in `data` the next fragment starts once its bytes arrive.
     scanned: usize,
     /// The next sample to decode, as fragment and sample index.
     cursor: (usize, usize),
     /// Frames before this are decoded only to reach it and never shown.
     skip_before: Duration,
+    /// When the picture was last asked for somewhere new, until its first frame is out.
+    asked: Option<std::time::Instant>,
 }
 
 impl Worker {
-    fn new(shelf: Arc<Mutex<Shelf>>) -> Self {
+    fn new(shelf: Arc<Mutex<Shelf>>, moves: Moves, limit: Arc<AtomicU64>) -> Self {
         Self {
             shelf,
+            moves,
+            limit,
+            lap: 0,
+            base: 0,
             data: Vec::new(),
             ended: false,
             track: None,
             decoder: None,
+            index: Vec::new(),
+            first: 0,
             fragments: Vec::new(),
             scanned: 0,
             cursor: (0, 0),
             skip_before: Duration::ZERO,
+            asked: Some(std::time::Instant::now()),
         }
     }
 
@@ -400,6 +469,7 @@ impl Worker {
     fn run(mut self, feed: Receiver<Feed>) -> anyhow::Result<()> {
         loop {
             let busy = self.room() && self.decode_one()?;
+            self.pace();
             let message = match busy {
                 true => feed.try_recv().map_err(|error| match error {
                     mpsc::TryRecvError::Empty => RecvTimeoutError::Timeout,
@@ -408,11 +478,12 @@ impl Worker {
                 false => feed.recv_timeout(IDLE),
             };
             match message {
-                Ok(Feed::Bytes(bytes)) => {
+                Ok(Feed::Bytes(lap, bytes)) if lap == self.lap => {
                     self.data.extend_from_slice(&bytes);
                     self.scan()?;
                 }
-                Ok(Feed::End) => self.ended = true,
+                Ok(Feed::End(lap)) if lap == self.lap => self.ended = true,
+                Ok(Feed::Bytes(..) | Feed::End(_)) => {}
                 Ok(Feed::Seek(to)) => self.seek(to)?,
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return Ok(()),
@@ -428,19 +499,33 @@ impl Worker {
             .unwrap_or(false)
     }
 
-    /// Reads the init segment once it is in, then every fragment that has fully arrived.
+    /// Reads the init segment and the index once they are in, then every fragment that has
+    /// fully arrived.
     fn scan(&mut self) -> anyhow::Result<()> {
         if self.track.is_none() {
             let Ok(track) = fmp4::read_init(&self.data) else {
                 return Ok(());
             };
+            let Some(index) = fmp4::read_index(&self.data, track.fragments_at)? else {
+                return Ok(());
+            };
             self.scanned = track.fragments_at;
-            self.decoder = Some(video::Decoder::new(&track)?);
+            let mut decoder = video::Decoder::new(&track)?;
+            decoder.set_floor(self.skip_before);
+            self.decoder = Some(decoder);
             if let Ok(mut shelf) = self.shelf.lock() {
                 shelf.width = track.width;
                 shelf.height = track.height;
             }
             self.track = Some(track);
+            self.index = index;
+            // Playback is usually somewhere into the video by now, and the index says where
+            // in the file that is.
+            let lap = self.lap;
+            self.aim();
+            if self.lap != lap {
+                return Ok(());
+            }
         }
         while let Some(fragment) = fmp4::read_fragment(&self.data, self.scanned)? {
             self.scanned = fragment.next;
@@ -449,23 +534,110 @@ impl Worker {
         Ok(())
     }
 
+    /// Points decoding at the segment that covers the seek target. When the bytes in hand do
+    /// not reach it, the download starts over there rather than reading its way to it.
+    fn aim(&mut self) {
+        let target = self.skip_before;
+        let Some(want) = self
+            .index
+            .iter()
+            .rposition(|segment| segment.start <= target)
+        else {
+            // No index to go by, so the target is found among the fragments in hand, and
+            // waited for when it is past them.
+            let ticks = self.ticks(target);
+            let fragment = self.fragments.iter().rposition(|fragment| {
+                fragment
+                    .samples
+                    .first()
+                    .is_some_and(|first| first.show <= ticks)
+            });
+            self.cursor = (fragment.unwrap_or(0), 0);
+            return;
+        };
+        let offset = self.index[want].offset;
+        let reach = self.base + self.data.len() + NEAR;
+        if want < self.first || offset < self.base || offset > reach {
+            return self.restart(want);
+        }
+        self.cursor = (want - self.first, 0);
+    }
+
+    /// Starts the download over at segment `want` of the index and forgets the bytes in hand.
+    fn restart(&mut self, want: usize) {
+        let offset = self.index[want].offset;
+        self.lap += 1;
+        self.base = offset;
+        self.first = want;
+        self.data.clear();
+        self.fragments.clear();
+        self.scanned = 0;
+        self.cursor = (0, 0);
+        self.ended = false;
+        self.limit
+            .store((offset + AHEAD_BYTES) as u64, Ordering::Relaxed);
+        self.moves.send((self.lap, offset as u64)).ok();
+    }
+
+    /// Keeps the download a little ahead of decoding and lets go of the segments well behind
+    /// it, so a long video is never held whole.
+    fn pace(&mut self) {
+        if self.cursor.0 > BEHIND && self.cursor.0 <= self.fragments.len() {
+            let gone = self.cursor.0 - BEHIND;
+            let cut = self.fragments[gone - 1].next;
+            self.data.drain(..cut);
+            self.fragments.drain(..gone);
+            for fragment in &mut self.fragments {
+                fragment.next -= cut;
+                for sample in &mut fragment.samples {
+                    sample.bytes = sample.bytes.start - cut..sample.bytes.end - cut;
+                }
+            }
+            self.scanned -= cut;
+            self.base += cut;
+            self.first += gone;
+            self.cursor.0 -= gone;
+        }
+        let decoded = match self.cursor.0.checked_sub(1) {
+            Some(before) => self
+                .fragments
+                .get(before)
+                .map_or(self.data.len(), |fragment| fragment.next),
+            None => 0,
+        };
+        self.limit.store(
+            (self.base + decoded + AHEAD_BYTES) as u64,
+            Ordering::Relaxed,
+        );
+    }
+
+    /// A time in the track's own ticks.
+    fn ticks(&self, at: Duration) -> u64 {
+        let timescale = self.track.as_ref().map_or(1, |track| track.timescale);
+        (at.as_secs_f64() * timescale as f64) as u64
+    }
+
     /// Decodes the next sample, when it has arrived. Answers whether there was one.
     fn decode_one(&mut self) -> anyhow::Result<bool> {
+        // Without an index, a seek target the bytes had not reached is jumped to once they have.
+        if self.index.is_empty() && self.track.is_some() {
+            let target = self.ticks(self.skip_before);
+            let jump = self.fragments.iter().rposition(|fragment| {
+                fragment
+                    .samples
+                    .first()
+                    .is_some_and(|first| first.show <= target)
+            });
+            if let Some(jump) = jump.filter(|jump| *jump > self.cursor.0) {
+                if let Some(decoder) = self.decoder.as_mut() {
+                    decoder.flush()?;
+                }
+                self.cursor = (jump, 0);
+            }
+        }
         let (Some(track), Some(decoder)) = (self.track.as_ref(), self.decoder.as_mut()) else {
             return Ok(false);
         };
-        // A seek target the bytes had not reached yet is jumped to once they have.
-        let target = (self.skip_before.as_secs_f64() * track.timescale as f64) as u64;
-        if let Some(jump) = self.fragments.iter().rposition(|fragment| {
-            fragment
-                .samples
-                .first()
-                .is_some_and(|first| first.show <= target)
-        }) && jump > self.cursor.0
-        {
-            decoder.flush()?;
-            self.cursor = (jump, 0);
-        }
         let (fragment, sample) = self.cursor;
         let Some(found) = self.fragments.get(fragment) else {
             if self.ended && fragment == self.fragments.len() && fragment > 0 {
@@ -492,15 +664,18 @@ impl Worker {
         Ok(true)
     }
 
-    /// Puts decoded frames on the shelf, leaving out those before a seek's target.
+    /// Puts decoded frames on the shelf.
     fn shelve(&mut self, frames: Vec<video::Frame>) {
         let Ok(mut shelf) = self.shelf.lock() else {
             return;
         };
         for frame in frames {
-            // The frame just before the target still shows until the target's own is due.
-            if frame.at + Duration::from_millis(100) < self.skip_before {
-                continue;
+            if let Some(asked) = self.asked.take() {
+                log::debug!(
+                    "video: the frame at {:?} is out {:?} after it was asked for",
+                    frame.at,
+                    asked.elapsed()
+                );
             }
             let Some(buffer) = image::RgbaImage::from_raw(frame.width, frame.height, frame.bgra)
             else {
@@ -514,27 +689,17 @@ impl Worker {
     /// Restarts decoding from the key frame at or before `to`.
     fn seek(&mut self, to: Duration) -> anyhow::Result<()> {
         self.skip_before = to;
-        let Some(track) = self.track.as_ref() else {
-            return Ok(());
-        };
-        let ticks = (to.as_secs_f64() * track.timescale as f64) as u64;
-        let fragment = self
-            .fragments
-            .iter()
-            .rposition(|fragment| {
-                fragment
-                    .samples
-                    .first()
-                    .is_some_and(|first| first.show <= ticks)
-            })
-            .unwrap_or(0);
+        self.asked.get_or_insert_with(std::time::Instant::now);
         if let Some(decoder) = self.decoder.as_mut() {
             decoder.flush()?;
+            decoder.set_floor(to);
         }
         if let Ok(mut shelf) = self.shelf.lock() {
             shelf.frames.clear();
         }
-        self.cursor = (fragment, 0);
+        if self.track.is_some() {
+            self.aim();
+        }
         Ok(())
     }
 }

@@ -15,6 +15,14 @@ fn main() -> anyhow::Result<()> {
         track.nal_length,
         track.parameters.iter().map(Vec::len).collect::<Vec<_>>()
     );
+    let index = video::fmp4::read_index(&data, track.fragments_at)?.unwrap_or_default();
+    println!(
+        "index: {} segments, first {:?}, last {:?}",
+        index.len(),
+        index.first(),
+        index.last()
+    );
+    let mut starts = Vec::new();
     let mut at = track.fragments_at;
     let (mut fragments, mut samples, mut keys) = (0, 0, 0);
     let mut last = 0;
@@ -31,12 +39,22 @@ fn main() -> anyhow::Result<()> {
             let nal = video::fmp4::annex_b(&track, first, &data)?;
             println!("  annex b {} bytes, starts {:02x?}", nal.len(), &nal[..8]);
         }
+        starts.push(at);
         fragments += 1;
         samples += fragment.samples.len();
         keys += fragment.samples.iter().filter(|sample| sample.key).count();
         last = fragment.samples.last().map_or(last, |sample| sample.show);
         at = fragment.next;
     }
+    let agree = index
+        .iter()
+        .zip(&starts)
+        .filter(|(segment, start)| segment.offset == **start)
+        .count();
+    println!(
+        "index offsets matching a fragment start: {agree} of {}",
+        starts.len()
+    );
     println!(
         "{fragments} fragments, {samples} samples, {keys} key frames, ends at {:.2}s, read to byte {at} of {}",
         last as f64 / track.timescale as f64,

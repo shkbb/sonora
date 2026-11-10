@@ -23,6 +23,9 @@ use windows::Win32::System::Com::{
 use crate::Frame;
 use crate::fmp4::Track;
 
+/// How far before the floor a picture is still turned into a frame, so the one on show when the
+/// floor is reached is there.
+const LEAD: Duration = Duration::from_millis(100);
 /// Media Foundation counts time in units of 100 nanoseconds.
 const TICK: u64 = 100;
 
@@ -38,6 +41,9 @@ pub struct Decoder {
     /// Whether the decoder hands out its own output samples, and how big one must be if not.
     provides: bool,
     output_size: u32,
+    /// Pictures shown before this are decoded only to reach the ones after, so they are not
+    /// turned into frames.
+    floor: Duration,
 }
 
 impl Decoder {
@@ -67,6 +73,7 @@ impl Decoder {
                 stride: track.width as usize,
                 provides: false,
                 output_size: 0,
+                floor: Duration::ZERO,
             };
             decoder.negotiate()?;
             decoder
@@ -105,6 +112,13 @@ impl Decoder {
         }
         self.pull(&mut frames)?;
         Ok(frames)
+    }
+
+    /// Leaves pictures shown before `floor` out of what [`push`](Self::push) gives back. A seek
+    /// lands between key frames, and converting the pictures on the way there is most of what
+    /// reaching the target costs.
+    pub fn set_floor(&mut self, floor: Duration) {
+        self.floor = floor;
     }
 
     /// Drops every picture the decoder holds, for a seek. The next push must be a key frame.
@@ -146,7 +160,7 @@ impl Decoder {
             match result {
                 Ok(()) => {
                     let sample = sample.context("the decoder gave an empty frame")?;
-                    frames.push(self.frame(&sample)?);
+                    frames.extend(self.frame(&sample)?);
                 }
                 Err(error) if error.code() == MF_E_TRANSFORM_NEED_MORE_INPUT => return Ok(()),
                 Err(error) if error.code() == MF_E_TRANSFORM_STREAM_CHANGE => self.negotiate()?,
@@ -194,11 +208,15 @@ impl Decoder {
         Ok(())
     }
 
-    /// A decoded sample as a BGRA frame of the display size.
-    fn frame(&self, sample: &IMFSample) -> Result<Frame> {
+    /// A decoded sample as a BGRA frame of the display size, or nothing for one before the
+    /// floor.
+    fn frame(&self, sample: &IMFSample) -> Result<Option<Frame>> {
         // SAFETY: the buffer stays locked while its bytes are read and is unlocked after.
         unsafe {
             let at = sample.GetSampleTime().unwrap_or(0).max(0) as u64 * TICK;
+            if Duration::from_nanos(at) + LEAD < self.floor {
+                return Ok(None);
+            }
             let buffer = sample.ConvertToContiguousBuffer()?;
             let mut data = std::ptr::null_mut();
             let mut length = 0u32;
@@ -212,12 +230,12 @@ impl Decoder {
                 self.height,
             );
             buffer.Unlock()?;
-            Ok(Frame {
+            Ok(Some(Frame {
                 at: Duration::from_nanos(at),
                 width: self.width,
                 height: self.height,
                 bgra: bgra?,
-            })
+            }))
         }
     }
 }

@@ -6,6 +6,7 @@
 //! is fed the samples one by one.
 
 use std::ops::Range;
+use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
 
@@ -73,6 +74,55 @@ pub fn read_init(data: &[u8]) -> Result<Track> {
         at = end;
     }
     bail!("the init segment ended before the first fragment")
+}
+
+/// One segment the file's index names: when its first picture is shown and the byte its `moof`
+/// starts at.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Segment {
+    pub start: Duration,
+    pub offset: usize,
+}
+
+/// Reads the segment index at `at`, where [`Track::fragments_at`] points. `None` while the
+/// index has not fully arrived. A file with no index there answers with no segments, and is
+/// then read from its start.
+pub fn read_index(data: &[u8], at: usize) -> Result<Option<Vec<Segment>>> {
+    let Some(header) = data.get(at..at + 8) else {
+        return Ok(None);
+    };
+    if &header[4..8] != b"sidx" {
+        return Ok(Some(Vec::new()));
+    }
+    let Some((_, body, end)) = next_box(data, at) else {
+        return Ok(None);
+    };
+    let sidx = &data[body];
+    let timescale = read_u32(sidx, 8)?.max(1) as f64;
+    let (mut ticks, first, mut cursor) = match sidx.first() {
+        Some(0) => (read_u32(sidx, 12)? as u64, read_u32(sidx, 16)? as u64, 20),
+        _ => (read_u64(sidx, 12)?, read_u64(sidx, 20)?, 28),
+    };
+    let count = u16::from_be_bytes(
+        sidx.get(cursor + 2..cursor + 4)
+            .context("the index is cut short")?
+            .try_into()?,
+    );
+    cursor += 4;
+    let mut offset = end + usize::try_from(first).context("the index offset does not fit")?;
+    let mut segments = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        let size = read_u32(sidx, cursor)? & 0x7fff_ffff;
+        let duration = read_u32(sidx, cursor + 4)?;
+        segments.push(Segment {
+            start: Duration::from_secs_f64(ticks as f64 / timescale),
+            offset,
+        });
+        offset += size as usize;
+        ticks += duration as u64;
+        cursor += 12;
+    }
+    Ok(Some(segments))
 }
 
 /// Reads the fragment whose `moof` starts at `at`. `None` while its `moof` or `mdat` has not

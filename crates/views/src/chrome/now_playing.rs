@@ -171,7 +171,13 @@ impl NowPlaying {
     fn screen(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = *cx.theme();
         let frame = self.picture.frame(&self.video, &self.playback, window, cx);
+        let width = self.width.get();
+        let shape = picture::shape(&self.video, cx);
         let playback = self.playback.read(cx);
+        let still = playback
+            .shown_track(cx)
+            .and_then(|track| track.cover)
+            .map(|cover| music::artwork::larger(&cover, COVER_EDGE));
         let playing = *playback.state() == PlaybackState::Playing;
         let (elapsed, total) = playback.shown_time(cx);
         let progress = self.pending.unwrap_or_else(|| fraction(elapsed, total));
@@ -196,9 +202,14 @@ impl NowPlaying {
                     window.dispatch_action(Box::new(ToggleFullscreen), cx);
                 }
             })
-            // The screen stays black until the first frame is decoded.
-            .when_some(frame, |this, frame| {
-                this.child(img(frame).size_full().object_fit(ObjectFit::Contain))
+            .map(|this| match frame {
+                Some(frame) => this.child(img(frame).size_full().object_fit(ObjectFit::Contain)),
+                // The still of the video holds the place until its first frame is decoded.
+                None => this.child(
+                    Artwork::new(still)
+                        .size(width.max(px(1.)))
+                        .wide(width / shape),
+                ),
             })
             .child(
                 div()

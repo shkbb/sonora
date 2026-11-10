@@ -40,6 +40,10 @@ impl VideoBody for Picture {
     async fn chunk(&mut self) -> Result<Option<bytes::Bytes>> {
         self.0.chunk().await
     }
+
+    fn seek(&mut self, offset: u64) {
+        self.0.seek(offset);
+    }
 }
 
 pub struct YouTubeClient {

@@ -20,4 +20,7 @@ pub struct VideoStream {
 pub trait VideoBody: Send {
     /// The next part of the body, or `None` once it has all arrived.
     async fn chunk(&mut self) -> Result<Option<Bytes>>;
+
+    /// Moves to the byte `offset` of the file, so the next chunk starts there.
+    fn seek(&mut self, offset: u64);
 }
