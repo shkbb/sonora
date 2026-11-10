@@ -24,6 +24,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   you a way back.
 - Click a song's title in the player bar, in Now playing or in any song list to open its album
   with the song picked out.
+- The About the artist card in Now playing shows the artist's photo framed whole and sharp.
 
 ## [0.48.1] - 2026-11-08
 

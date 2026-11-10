@@ -74,6 +74,22 @@ pub fn larger(url: &str, edge: u32) -> String {
     format!("{base}={options}")
 }
 
+/// The same picture on Google's image servers cut by the server to `width` by `height`, which
+/// keeps the subject in frame better than cropping a wide banner on our side, since a banner
+/// is already a strip cut from a taller photo. Any other url comes back unchanged.
+pub fn framed(url: &str, width: u32, height: u32) -> String {
+    let Some((base, _)) = url.rsplit_once('=') else {
+        return url.to_owned();
+    };
+    let google = [".googleusercontent.com/", ".ggpht.com/"]
+        .iter()
+        .any(|host| base.contains(host));
+    match google {
+        true => format!("{base}=w{width}-h{height}-p-l90-rj"),
+        false => url.to_owned(),
+    }
+}
+
 /// The 1280-wide still of a video on `i.ytimg.com`, from any of the smaller ones YouTube Music
 /// hands out. The smaller ones are 4:3 with black bars, and their query crops them further.
 fn video_still(url: &str) -> Option<String> {

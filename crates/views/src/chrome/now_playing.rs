@@ -41,6 +41,10 @@ const UNSUNG: f32 = 0.55;
 const LINE_GAP: f32 = 0.5;
 /// How much of the last line the fade at the bottom of the lyrics preview covers.
 const FADE_ROWS: f32 = 0.45;
+/// The size the About the artist banner is asked of Google's image server at, in the 3:2 of
+/// the card's photo and sharp at twice the panel's width.
+const BANNER_WIDTH: u32 = 1080;
+const BANNER_HEIGHT: u32 = 720;
 /// How long past its animation a slide is held, so its last frame is drawn before it goes.
 const SLIDE_GRACE: Duration = Duration::from_millis(80);
 /// How many lines of the lyrics the preview shows.
@@ -733,7 +737,19 @@ impl Render for NowPlaying {
                             .when_some(artist, |this, artist| {
                                 this.child(
                                     AboutArtist::new("now-playing-artist", artist.name.clone())
-                                        .cover(artist.banner.clone().or(artist.cover_large.clone()))
+                                        .cover(
+                                            artist
+                                                .banner
+                                                .as_deref()
+                                                .map(|banner| {
+                                                    music::artwork::framed(
+                                                        banner,
+                                                        BANNER_WIDTH,
+                                                        BANNER_HEIGHT,
+                                                    )
+                                                })
+                                                .or(artist.cover_large.clone()),
+                                        )
                                         .square(artist.banner.is_none())
                                         .biography(artist.biography.clone())
                                         .stacked(width)
