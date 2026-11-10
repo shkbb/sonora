@@ -27,6 +27,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The About the artist card in Now playing shows the artist's photo framed whole and sharp.
 - An artist's page with a banner shows it large across the top, with the name and buttons on
   it and no round picture, as on YouTube Music.
+- Choose Don't play this artist in an artist's menu to skip their songs everywhere. Their songs
+  show greyed out in lists, and the same menu lets them play again.
 
 ### Fixed
 

@@ -157,6 +157,8 @@ menu-remove-playlist-from-library = Вилучити з медіатеки
 menu-make-playlist-public = Зробити публічним
 menu-make-playlist-private = Зробити приватним
 menu-play-artist = Відтворити виконавця
+menu-block-artist = Не грати цього виконавця
+menu-unblock-artist = Дозволити грати цього виконавця
 
 # playlist editor
 playlist-name-placeholder = Назва плейлиста
@@ -1460,6 +1462,8 @@ theme-install-title = Встановити { $name }?
 theme-install-detail = Тему буде додано до теки тем.
 theme-install-confirm = Встановити
 toast-track-moved = Переміщено до { $name }
+toast-artist-blocked = { $name } більше не гратиме
+toast-artist-unblocked = { $name } знову гратиме
 toast-session-invalidated = Ваша сесія { $name } більше не дійсна
 toast-sign-in = Увійти
 lyrics-instrumental-break = Інструментальна пауза

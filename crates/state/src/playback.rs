@@ -1050,7 +1050,9 @@ impl Playback {
         let playable = tracks
             .iter()
             .enumerate()
-            .filter(|(_, track)| track.playable && self.unreachable_reason(track, cx).is_none())
+            .filter(|(_, track)| {
+                self.plays(track, cx) && self.unreachable_reason(track, cx).is_none()
+            })
             .map(|(index, _)| index)
             .collect::<Vec<_>>();
         match self.queue.read(cx).shuffle() {
@@ -1429,7 +1431,11 @@ impl Playback {
             return true;
         };
         self.leave_station();
-        self.play(&track, cx);
+        // A song by a blocked artist hands over to the next one that is not.
+        match self.settings.read(cx).blocks(&track) {
+            true => self.follow_queue(Start::Pick, cx),
+            false => self.play(&track, cx),
+        }
         true
     }
 
@@ -1848,8 +1854,9 @@ impl Playback {
         self.load_after(&track, start, cx);
     }
 
-    /// The next playable track the queue has, dropping the ones that are not. Reaching the
-    /// suggestions means radio has taken over from the station the queue was playing.
+    /// The next playable track the queue has, dropping the ones that are not and the ones by an
+    /// artist the user blocked. Reaching the suggestions means radio has taken over from the
+    /// station the queue was playing.
     fn playable_next(&mut self, cx: &mut Context<Self>) -> Option<Track> {
         loop {
             let suggested = self.queue.read(cx).next_is_suggested();
@@ -1857,14 +1864,19 @@ impl Playback {
             if suggested {
                 self.leave_station();
             }
-            if track.playable {
+            if self.plays(&track, cx) {
                 return Some(track);
             }
         }
     }
 
+    /// Whether `track` can play and is not by an artist the user blocked.
+    fn plays(&self, track: &Track, cx: &App) -> bool {
+        track.playable && !self.settings.read(cx).blocks(track)
+    }
+
     fn follow_after(&mut self, track: Track, start: Start, cx: &mut Context<Self>) {
-        let track = match track.playable {
+        let track = match self.plays(&track, cx) {
             true => Some(track),
             false => self.playable_next(cx),
         };

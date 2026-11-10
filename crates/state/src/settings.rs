@@ -189,6 +189,15 @@ impl SideTab {
     }
 }
 
+/// An artist whose songs are never played, by the id and name their service gave. The name is
+/// kept so a song listing the artist without an id is still caught, and so the list reads in
+/// `settings.json`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockedArtist {
+    pub id: String,
+    pub name: String,
+}
+
 /// The writing systems lyrics romanization applies to. Only CJK are enabled by default.
 /// A partial object in `settings.json` keeps the defaults for the scripts it leaves out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -427,6 +436,8 @@ struct Values {
     subsonic_lyrics_offered: bool,
     /// Whether lyrics show anywhere and are looked up at all.
     lyrics_enabled: bool,
+    /// The artists whose songs are skipped wherever they come up.
+    blocked_artists: Vec<BlockedArtist>,
     lyrics_providers: Vec<String>,
     /// Every known lyrics source, the preferred one first. Lyrics of the same kind from two
     /// sources go to the one listed higher.
@@ -630,6 +641,7 @@ impl Default for Values {
             local_lyrics_offered: false,
             subsonic_lyrics_offered: false,
             lyrics_enabled: true,
+            blocked_artists: Vec::new(),
             lyrics_provider_priority: lyrics_priority(&[]),
             // Kugou and NetEase, the last two, start switched off.
             lyrics_providers: LYRICS_SOURCES[..7]
@@ -1116,6 +1128,30 @@ impl AppSettings {
 
     pub fn lyrics_enabled(&self) -> bool {
         self.values.lyrics_enabled
+    }
+
+    pub fn blocked_artists(&self) -> &[BlockedArtist] {
+        &self.values.blocked_artists
+    }
+
+    pub fn is_artist_blocked(&self, id: &str) -> bool {
+        self.values
+            .blocked_artists
+            .iter()
+            .any(|blocked| blocked.id == id)
+    }
+
+    /// Whether `track` is by an artist the user blocked, so it is skipped and shown as not
+    /// playable. An artist the song names without an id is matched by name.
+    pub fn blocks(&self, track: &music::Track) -> bool {
+        let blocked = &self.values.blocked_artists;
+        !blocked.is_empty()
+            && track.artist_refs.iter().any(|artist| match &artist.id {
+                Some(id) => blocked.iter().any(|blocked| &blocked.id == id),
+                None => blocked
+                    .iter()
+                    .any(|blocked| blocked.name.eq_ignore_ascii_case(&artist.name)),
+            })
     }
 
     pub fn lyrics_providers(&self) -> &[String] {
@@ -1701,6 +1737,24 @@ impl AppSettings {
 
     pub fn set_artwork_for_local_files(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.values.artwork_for_local_files = enabled;
+        self.schedule_save(cx);
+    }
+
+    /// Blocks the artist `id`, or lets them play again.
+    pub fn set_artist_blocked(
+        &mut self,
+        id: &str,
+        name: &str,
+        blocked: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.values.blocked_artists.retain(|artist| artist.id != id);
+        if blocked {
+            self.values.blocked_artists.push(BlockedArtist {
+                id: id.to_owned(),
+                name: name.to_owned(),
+            });
+        }
         self.schedule_save(cx);
     }
 

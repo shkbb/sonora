@@ -175,6 +175,8 @@ menu-remove-playlist-from-library = Remove from Library
 menu-make-playlist-public = Make public
 menu-make-playlist-private = Make private
 menu-play-artist = Play artist
+menu-block-artist = Don't play this artist
+menu-unblock-artist = Allow this artist to play
 
 # playlist editor
 playlist-name-placeholder = Playlist name
@@ -1165,6 +1167,8 @@ toast-playlist-visibility = Playlist visibility changed
 toast-track-added = Added to { $name }
 toast-track-removed = Removed from { $name }
 toast-track-moved = Moved to { $name }
+toast-artist-blocked = { $name } won't play anymore
+toast-artist-unblocked = { $name } can play again
 toast-track-removed-unnamed = Removed from the playlist
 toast-playlist-failed = That change could not be saved
 toast-playlist-busy = Another change is still running

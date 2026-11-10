@@ -1080,6 +1080,7 @@ pub(crate) fn artist_menu(
     let played = Origin::artist(artist_id.clone()).named(artist.name.clone());
     let queued_from = played.clone();
     let playing = playback.clone();
+    let playback_for_block = playback.clone();
 
     let open = match opened_here {
         true => Vec::new(),
@@ -1104,14 +1105,45 @@ pub(crate) fn artist_menu(
             .into_iter()
             .chain(collection_queue_items(queued_from, playback))
             .collect(),
-            vec![copy_link_item(
-                "copy-artist-link",
-                MediaKind::Artist,
-                Some(&artist_id),
-                cx,
-            )],
+            vec![
+                block_artist_item(&artist, playback_for_block, cx),
+                copy_link_item("copy-artist-link", MediaKind::Artist, Some(&artist_id), cx),
+            ],
         ],
     )
+}
+
+/// Blocks the artist so none of their songs play, or lets them play again. Blocking skips the
+/// song playing now when it is theirs.
+fn block_artist_item(artist: &SavedArtist, playback: Entity<Playback>, cx: &App) -> MenuItem {
+    let blocked = Sonora::global(cx)
+        .settings
+        .read(cx)
+        .is_artist_blocked(&artist.id);
+    let (id, name) = (artist.id.clone(), artist.name.clone());
+    MenuItem::new(
+        "block-artist",
+        match blocked {
+            true => t!("menu-unblock-artist"),
+            false => t!("menu-block-artist"),
+        },
+    )
+    .icon("icons/play-off.svg")
+    .on_click(move |_, _, cx| {
+        let settings = Sonora::global(cx).settings.clone();
+        settings.update(cx, |settings, cx| {
+            settings.set_artist_blocked(&id, &name, !blocked, cx)
+        });
+        let key = match blocked {
+            true => "toast-artist-unblocked",
+            false => "toast-artist-blocked",
+        };
+        Toasts::about(Outcome::Done, key, name.clone(), cx);
+        let playing = playback.read(cx).shown_track(cx);
+        if !blocked && playing.is_some_and(|track| settings.read(cx).blocks(&track)) {
+            playback.update(cx, |playback, cx| playback.next(cx));
+        }
+    })
 }
 
 /// The tiles of a playlist menu: the heart that keeps someone else's playlist in the library,

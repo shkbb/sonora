@@ -67,7 +67,9 @@ pub(crate) fn first_playable(table: &Entity<TableState<TrackSource>>, cx: &App) 
         delegate
             .source()
             .peek(delegate.row(*display), cx)
-            .is_some_and(|track| track.playable)
+            .is_some_and(|track| {
+                track.playable && !Sonora::global(cx).settings.read(cx).blocks(track)
+            })
     })
 }
 
@@ -396,9 +398,10 @@ impl TrackSource {
     }
 
     /// Whether a row can start playback now, which a track that has to be streamed cannot while
-    /// the network is gone.
+    /// the network is gone, nor a song by an artist the user blocked.
     fn plays_now(&self, track: &Track, cx: &App) -> bool {
         track.playable
+            && !Sonora::global(cx).settings.read(cx).blocks(track)
             && self
                 .playback
                 .read(cx)
