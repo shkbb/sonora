@@ -212,6 +212,8 @@ confirm-delete-track-files = Файли буде остаточно видале
 
 # queue panel
 queue-title = Черга
+login-providers = Музичні сервіси
+window-restore = Відновити
 player-sessions = Сесії
 devices-spotify-jams = Джеми Spotify
 devices-session-start = Почати сесію
