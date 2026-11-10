@@ -13,6 +13,7 @@ use gpui::{
     div, ease_in_out, px, relative, size, svg, uniform_list,
 };
 use i18n::t;
+use input::ToggleNowPlaying;
 use music::{Contributor, Shape, Track, Voice};
 use router::{Destination, LibraryTab, Link as _};
 use state::{
@@ -216,6 +217,8 @@ pub(crate) struct Aside {
     queue_track: Option<String>,
     anchor: bool,
     titled: bool,
+    /// Whether the header leads back to Now Playing, for lyrics or a queue opened from there.
+    back: bool,
     aiming: bool,
     rested: Option<Pixels>,
     since: std::time::Instant,
@@ -320,6 +323,7 @@ impl Aside {
             queue_track: None,
             anchor: true,
             titled: true,
+            back: false,
             aiming: false,
             rested: None,
             since: std::time::Instant::now(),
@@ -356,6 +360,14 @@ impl Aside {
             sheet_layout: None,
             settled: Vec::new(),
             was_settled: Vec::new(),
+        }
+    }
+
+    /// Puts a way back to Now Playing at the start of the header, or takes it away.
+    pub(crate) fn set_back(&mut self, back: bool, cx: &mut Context<Self>) {
+        if self.back != back {
+            self.back = back;
+            cx.notify();
         }
     }
 
@@ -840,15 +852,34 @@ impl Aside {
             .h(snapped(theme.metrics.header, window))
             .px_2()
             .when(self.titled, |this| {
-                this.border_b_1().border_color(theme.border).child(eyebrow(
-                    match self.tab {
-                        SideTab::Queue => t!("queue-title"),
-                        SideTab::Lyrics => t!("lyrics-title"),
-                        SideTab::Members => t!("members-title"),
-                        SideTab::NowPlaying => t!("now-playing-title"),
-                    },
-                    cx,
-                ))
+                this.border_b_1().border_color(theme.border).child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .min_w_0()
+                        .when(self.back, |this| {
+                            this.child(
+                                Button::new("aside-back")
+                                    .ghost()
+                                    .small()
+                                    .icon("icons/chevron-left.svg")
+                                    .tooltip("now-playing-back")
+                                    .on_click(|_, window, cx| {
+                                        window.dispatch_action(Box::new(ToggleNowPlaying), cx)
+                                    }),
+                            )
+                        })
+                        .child(eyebrow(
+                            match self.tab {
+                                SideTab::Queue => t!("queue-title"),
+                                SideTab::Lyrics => t!("lyrics-title"),
+                                SideTab::Members => t!("members-title"),
+                                SideTab::NowPlaying => t!("now-playing-title"),
+                            },
+                            cx,
+                        )),
+                )
             })
             .when(!self.titled, |this| {
                 this.justify_end().pr(theme.metrics.control + px(8.))

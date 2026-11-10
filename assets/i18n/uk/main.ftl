@@ -212,10 +212,15 @@ confirm-delete-track-files = Файли буде остаточно видале
 
 # queue panel
 queue-title = Черга
+player-sessions = Сесії
+devices-spotify-jams = Джеми Spotify
+devices-session-start = Почати сесію
+devices-session-join = Приєднатися до сесії…
 video-title = Відео
 search-videos = Відео
 now-playing-title = Зараз грає
 now-playing-lyrics = Фрагмент тексту
+now-playing-back = Назад до «Зараз грає»
 player-mode = Аудіо чи відео
 player-mode-audio = Аудіо
 player-mode-video = Відео

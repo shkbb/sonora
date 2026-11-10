@@ -25,6 +25,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Search finds videos on YouTube Music and lists them under the best match.
 - A music video starts from where the song is within about a second, and seeking in one is
   quick, however long the video.
+- Switching a song to its music video and back is near instant while Now playing is open, and
+  the cover, lyrics and artist stay up through the switch.
+- The lyrics in Now playing slide up line by line, and opening the full lyrics from there gives
+  you a way back.
 
 ### Changed
 
@@ -46,6 +50,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The About the artist card in Now playing scrolls clear of the player bar.
 - A YouTube Music sign-in made in Sonora's window on Windows no longer drops after a couple of
   hours. Sonora renews it in the background.
 - A YouTube channel that only uploads videos now shows them on its page instead of an empty one.

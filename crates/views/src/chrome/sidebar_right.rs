@@ -109,6 +109,9 @@ impl SidebarRight {
         if tab.shared() {
             self.aside.update(cx, |aside, cx| aside.show(tab, cx));
         }
+        // Lyrics or the queue opened from Now Playing lead back to it.
+        let back = self.open && self.tab == SideTab::NowPlaying && tab.shared();
+        self.aside.update(cx, |aside, cx| aside.set_back(back, cx));
         self.tab = tab;
         self.open = true;
         self.watch_now_playing(cx);
@@ -133,6 +136,7 @@ impl SidebarRight {
     }
 
     pub(crate) fn close(&mut self, cx: &mut Context<Self>) {
+        self.aside.update(cx, |aside, cx| aside.set_back(false, cx));
         self.aside.update(cx, |aside, cx| aside.dismiss(cx));
         self.open = false;
         self.watch_now_playing(cx);

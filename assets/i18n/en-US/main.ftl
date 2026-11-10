@@ -289,6 +289,7 @@ video-title = Video
 search-videos = Videos
 now-playing-title = Now playing
 now-playing-lyrics = Lyrics preview
+now-playing-back = Back to Now playing
 player-mode = Audio or video
 player-mode-audio = Audio
 player-mode-video = Video
