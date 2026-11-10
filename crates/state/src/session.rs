@@ -24,8 +24,9 @@ const WINDOW_POLL: Duration = Duration::from_millis(300);
 const KEEP: Duration = Duration::from_secs(40 * 60);
 /// How often the session looks whether a renewal is due: one is due every [`KEEP`], and at once
 /// when the provider says the session was just answered as signed out.
-const KEEP_CHECK: Duration = Duration::from_secs(20);
+const KEEP_CHECK: Duration = Duration::from_secs(5);
 /// The least time between two renewals, so a session that cannot be renewed is not hammered.
+/// The first renewal after the session opens has nothing to wait for.
 const KEEP_REST: Duration = Duration::from_secs(3 * 60);
 /// How long a renewal page loads before its cookies are taken, which is time for the browser to
 /// renew a session that is due.
@@ -895,7 +896,8 @@ impl Session {
             return;
         }
         self.keep_timer = Some(cx.spawn(async move |this, cx| {
-            let mut renewed = std::time::Instant::now();
+            let opened = std::time::Instant::now();
+            let mut renewed: Option<std::time::Instant> = None;
             loop {
                 cx.background_executor().timer(KEEP_CHECK).await;
                 let going = this.update(cx, |this, cx| {
@@ -903,10 +905,10 @@ impl Session {
                     if this.active != Some(index) || !signed_in {
                         return false;
                     }
-                    let since = renewed.elapsed();
-                    let lapsed = this.providers[index].lapsed() && since >= KEEP_REST;
-                    if lapsed || since >= KEEP {
-                        renewed = std::time::Instant::now();
+                    let rested = renewed.is_none_or(|at| at.elapsed() >= KEEP_REST);
+                    let lapsed = this.providers[index].lapsed() && rested;
+                    if lapsed || renewed.unwrap_or(opened).elapsed() >= KEEP {
+                        renewed = Some(std::time::Instant::now());
                         this.renew(index, false, cx);
                     }
                     true
@@ -953,6 +955,9 @@ impl Session {
             }
         }
         log::debug!("session: renewing {} in its kept profile", provider.name());
+        // A renewal that brings back a session YouTube had let go tells the pages, so whatever
+        // failed while it was gone loads again.
+        let lapsed = provider.lapsed();
         let io = self.io.clone();
         let began = std::time::Instant::now();
         self.keeper_task = Some(cx.spawn(async move |this, cx| {
@@ -1000,6 +1005,9 @@ impl Session {
                 match &renewed {
                     Ok(()) => log::debug!("session: renewed the sign-in in its kept profile"),
                     Err(error) => log::warn!("session: cannot renew the sign-in: {error}"),
+                }
+                if renewed.is_ok() && lapsed && !restore && this.active == Some(index) {
+                    cx.emit(SessionEvent::Reconnected);
                 }
                 if !restore || this.active != Some(index) {
                     return;

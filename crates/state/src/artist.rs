@@ -48,7 +48,13 @@ impl ArtistDetail {
                     cx.notify();
                 }
             }
-            SessionEvent::Reconnected | SessionEvent::WentOffline => {}
+            // A page that failed while the session was gone loads again once it is back.
+            SessionEvent::Reconnected => {
+                if this.error.is_some() {
+                    this.refresh(cx);
+                }
+            }
+            SessionEvent::WentOffline => {}
             SessionEvent::LocalChanged => {
                 if let Some(id) = this.id.clone().filter(|id| music::is_local_id(id)) {
                     this.clear();

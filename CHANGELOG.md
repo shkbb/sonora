@@ -28,6 +28,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - An artist's page with a banner shows it large across the top, with the name and buttons on
   it and no round picture, as on YouTube Music.
 
+### Fixed
+
+- When YouTube signs you out in the middle of a session, Sonora signs back in within seconds and
+  reloads the page that failed to open.
+
 ## [0.48.1] - 2026-11-08
 
 ### Changed

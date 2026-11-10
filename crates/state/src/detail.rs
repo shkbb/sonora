@@ -90,7 +90,13 @@ impl Detail {
                     }
                 }
             }
-            SessionEvent::Reconnected | SessionEvent::WentOffline => {}
+            // A page that failed while the session was gone loads again once it is back.
+            SessionEvent::Reconnected => {
+                if this.error.is_some() {
+                    this.refresh(cx);
+                }
+            }
+            SessionEvent::WentOffline => {}
             SessionEvent::LocalChanged => {
                 if let (Some(kind), Some(id)) = (
                     this.kind,
