@@ -961,6 +961,8 @@ equalizer-status-channels = { $from ->
     [2] стерео
    *[other] { $to } кан.
 }
+settings-lyrics = Показувати тексти пісень
+settings-lyrics-detail = Вимкніть, щоб приховати тексти пісень усюди й припинити їх пошук
 settings-panel-lyrics-size = Розмір тексту пісні (панель)
 settings-panel-lyrics-size-detail = Розмір рядків тексту пісні на бічній панелі поверх базового розміру шрифту
 settings-fullscreen-lyrics-size = Розмір тексту пісні (повний екран)
@@ -1354,3 +1356,141 @@ response-graph-readout = { $frequency } · { $direction ->
         [down] -{ $gain }
        *[flat] { $gain }
     } дБ
+
+## Рядки, додані в 0.48
+
+option-variants = Варіанти: { $name }
+table-sorted-ascending = Відсортовано за зростанням
+table-sorted-descending = Відсортовано за спаданням
+range-from = Від
+range-to = До
+rail-back = Прокрутити назад
+rail-forward = Прокрутити вперед
+downloads-active = Завантажується
+downloads-left = { $count ->
+    [one] Лишилась { $count } пісня
+    [few] Лишилось { $count } пісні
+   *[other] Лишилось { $count } пісень
+}
+downloads-eta = Приблизно { $minutes } хв
+downloads-songs = Пісні
+downloads-cancel = Скасувати завантаження
+downloads-cancel-all = Скасувати всі завантаження
+window-maximize = Розгорнути
+menu-add-to-playlist = Додати до плейлиста
+menu-add-tracks-to-playlist = { $count ->
+    [one] Додати { $count } трек до плейлиста
+    [few] Додати { $count } треки до плейлиста
+   *[other] Додати { $count } треків до плейлиста
+}
+devices-jam-people = { $count ->
+    [one] { $count } людина в цьому Jam
+    [few] { $count } людини в цьому Jam
+   *[other] { $count } людей у цьому Jam
+    }
+devices-jam-remove-member = Вилучити { $name }
+members-title = Учасники
+members-empty = Почніть сесію або приєднайтесь до неї, щоб бачити, хто слухає з вами
+devices-session-join-title = Приєднатися до сесії
+devices-session-join-detail = Введіть код, яким поділився друг
+devices-session-join-confirm = Приєднатися
+devices-session-code = Код сесії
+devices-session-code-menu = Показати код сесії
+devices-session-code-title = Ваш код сесії
+devices-session-code-detail = Приєднатися за цим кодом може будь-хто, хто увійшов у { $provider }
+devices-session-code-close = Готово
+devices-session-copy = Копіювати код
+devices-session-leave = Вийти із сесії
+devices-session-end = Завершити сесію
+devices-session-reconnecting = Перепідключення…
+devices-session-people = { $count ->
+    [one] { $count } людина в цій сесії
+    [few] { $count } людини в цій сесії
+   *[other] { $count } людей у цій сесії
+    }
+fullscreen-panels = Вигляд «Зараз грає»
+login-problem-subscription = На цьому Apple ID немає активної підписки.
+login-subscription-check = Перевірити Apple Music
+artist-favorite-songs = Ваші улюблені пісні
+artist-favorite-songs-count = { $count ->
+    [one] { $count } пісня в улюблених
+    [few] { $count } пісні в улюблених
+   *[other] { $count } пісень в улюблених
+}
+track-row-name = { $title }, { $artists }
+settings-theme-explore = Теми спільноти
+settings-theme-explore-detail = Знайдіть теми, які зробили інші, і встановіть їх одним кліком
+settings-theme-delete = Видалити тему
+settings-theme-delete-title = Видалити { $name }?
+settings-theme-delete-detail = Тему буде вилучено з теки тем. Це не можна скасувати.
+settings-font-smaller = Менший текст
+settings-font-larger = Більший текст
+settings-sample-rate-lower = Нижча частота дискретизації
+settings-sample-rate-higher = Вища частота дискретизації
+settings-buffer-smaller = Менший буфер
+settings-buffer-larger = Більший буфер
+settings-match-rate = Підлаштовувати частоту дискретизації
+settings-match-rate-detail = Грає кожен трек з його власною частотою дискретизації
+settings-match-rate-direct-only = Потрібен пристрій із розділу «Напряму на обладнання»
+settings-signal-path = Шлях сигналу
+equalizer-filter = Фільтр { $number }
+equalizer-filter-kind = Тип фільтра { $number }
+equalizer-mode = Режим
+equalizer-preamp-level = Рівень підсилення
+equalizer-no-gain-spoken = Без підсилення
+equalizer-filter-frequency = Частота фільтра { $number }
+equalizer-filter-gain = Підсилення фільтра { $number }
+equalizer-filter-width = Ширина фільтра { $number }
+equalizer-graph = Частотна характеристика
+equalizer-graph-detail = { $count ->
+    [0] Без фільтрів
+    [one] { $count } фільтр
+    [few] { $count } фільтри
+   *[other] { $count } фільтрів
+    }, підсилення { $db } дБ
+equalizer-rule-device = Пристрій
+settings-lyrics-priority-detail = Sonora показує синхронізований текст з найвищого джерела, де він є
+settings-group-sessions = Сесії
+settings-sessions-button = Показувати кнопку сесій
+settings-sessions-official = Використовувати офіційний сервер сесій Sonora
+settings-sessions-server = Адреса сервера
+settings-sessions-server-hint = wss://sessions.example.com
+settings-sessions-save = Зберегти
+theme-install-title = Встановити { $name }?
+theme-install-detail = Тему буде додано до теки тем.
+theme-install-confirm = Встановити
+toast-track-moved = Переміщено до { $name }
+toast-session-invalidated = Ваша сесія { $name } більше не дійсна
+toast-sign-in = Увійти
+lyrics-instrumental-break = Інструментальна пауза
+settings-update-channel = Канал оновлень
+settings-update-channel-detail = Стабільний іде за релізами. Нічний іде за збіркою main, яка робиться щоночі: зміни приходять раніше, але перевірені менше
+update-channel-stable = Стабільний
+update-channel-nightly = Нічний
+toast-output-direct-failed = Не вдається грати напряму на пристрій
+toast-output-rate-failed = Не вдається змінити частоту дискретизації пристрою
+toast-session-needs-provider = Щоб почати сесію, увійдіть у стримінговий сервіс.
+toast-session-not-found = Сесії з таким кодом немає.
+toast-session-provider = Ця сесія грає з { $name }. Увійдіть у { $name }, щоб приєднатися.
+toast-session-full = Ця сесія заповнена.
+toast-session-rate-limited = Забагато неправильних кодів. Спробуйте за кілька хвилин.
+toast-session-too-many = Ваша мережа вже веде максимум сесій. Завершіть одну, щоб почати іншу.
+toast-session-unreachable = Не вдалося зв'язатися із сесіями Sonora. Спробуйте пізніше.
+toast-session-failed = Не вдалося почати сесію або приєднатися до неї.
+toast-session-lost = Зв'язок із сесією втрачено
+toast-session-ended = Сесію завершено
+toast-session-left = Ви вийшли із сесії
+toast-session-kicked = Організатор вилучив вас із сесії
+toast-session-code-copied = Код скопійовано
+toast-sessions-server-saved = Сервер сесій збережено
+toast-sessions-server-empty = Спершу введіть адресу сервера
+toast-sessions-server-malformed = Це не схоже на адресу сервера
+toast-sessions-server-silent = За цією адресою не відповідає сервер сесій Sonora, тож її не збережено
+toast-download-started = Почато завантаження { $name }
+toast-downloads-started = { $count ->
+    [one] Почато завантаження { $count } пісні
+   *[other] Почато завантаження { $count } пісень
+}
+toast-theme-link-unreadable = Посилання на тему пошкоджене або веде не на тему
+toast-theme-install-failed = Не вдається встановити { $name }
+toast-theme-delete-failed = Не вдається видалити { $name }

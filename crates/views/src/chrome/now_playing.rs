@@ -338,6 +338,9 @@ impl NowPlaying {
     /// song moves on a line, the line sung leaves through the top and the rest slide up.
     fn preview(&mut self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let theme = *cx.theme();
+        if !self.settings.read(cx).lyrics_enabled() {
+            return None;
+        }
         let hit = match self.lyrics.read(cx).current().cloned() {
             Some(hit) => {
                 self.kept_lyrics = Some(hit.clone());
