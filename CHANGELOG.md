@@ -25,6 +25,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Click a song's title in the player bar, in Now playing or in any song list to open its album
   with the song picked out.
 - The About the artist card in Now playing shows the artist's photo framed whole and sharp.
+- An artist's page with a banner shows it large across the top, with the name and buttons on
+  it and no round picture, as on YouTube Music.
 
 ## [0.48.1] - 2026-11-08
 

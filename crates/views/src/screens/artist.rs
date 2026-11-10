@@ -48,9 +48,12 @@ const TABLE_BORDER: Pixels = px(1.);
 /// The least and the most room the banner adds above the hero, as shares of the cover's edge.
 /// In between, the banner box keeps `BANNER_BOX` as its aspect, so a narrow page lifts the
 /// hero less.
-const BANNER_RISE_LEAST: f32 = 0.35;
-const BANNER_RISE_MOST: f32 = 1.;
-const BANNER_BOX: f32 = 2.7;
+const BANNER_RISE_LEAST: f32 = 0.6;
+const BANNER_RISE_MOST: f32 = 1.6;
+const BANNER_BOX: f32 = 2.4;
+/// How far down the hero the banner stays sharp, as a share of the cover's edge. The hero has
+/// no cover over a banner, so this is about where its title and actions end.
+const BANNER_UNDER_TITLE: f32 = 0.5;
 /// The room above the hero when only a blurred portrait stands in for the banner. The wash has
 /// no proportions to keep, so it stays this tall at any width.
 const BANNER_RISE_WASH: f32 = 0.6;
@@ -387,6 +390,7 @@ impl ArtistView {
             .map(|id| Pin::new(PinKind::Artist, id, title.clone()).cover(cover.clone()));
 
         PageHero::new("artist-hero", title)
+            .coverless(artist.is_some_and(|artist| artist.banner.is_some()))
             .pending(artist.is_none() && self.detail.read(cx).is_loading())
             .pin(pin)
             .cover(cover)
@@ -1296,14 +1300,20 @@ impl Render for ArtistView {
             .read(cx)
             .artist()
             .is_some_and(|artist| artist.banner.is_some());
+        // With a banner the hero has no cover and its title sits on the banner's lower part, as
+        // on YouTube Music, so the banner stays sharp down through the title.
         let rise = match banner_shown {
-            true => ((self.width + inset * 2.) / BANNER_BOX - inset - cover)
+            true => ((self.width + inset * 2.) / BANNER_BOX - inset - cover * BANNER_UNDER_TITLE)
                 .max(cover * BANNER_RISE_LEAST)
                 .min(cover * BANNER_RISE_MOST),
             false => cover * BANNER_RISE_WASH,
         };
         let rise = snapped(rise, window);
-        let banner = self.banner(inset, inset + rise + cover, inset + rise, cx);
+        let sharp = match banner_shown {
+            true => inset + rise + cover * BANNER_UNDER_TITLE,
+            false => inset + rise,
+        };
+        let banner = self.banner(inset, inset + rise + cover, sharp, cx);
         let tracks = match self.mode {
             Mode::Grid => self.popular(cx),
             Mode::List => self.listed(cx),

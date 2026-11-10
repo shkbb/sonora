@@ -361,6 +361,8 @@ pub(crate) struct PageHero {
     meta: Option<AnyElement>,
     actions: Option<AnyElement>,
     circle: bool,
+    /// Whether the hero leaves out its cover, for a page whose banner stands behind the title.
+    coverless: bool,
     explicit: bool,
     drag_start: Option<DragStart>,
     pin: Option<Pin>,
@@ -379,6 +381,7 @@ impl PageHero {
             meta: None,
             actions: None,
             circle: false,
+            coverless: false,
             explicit: false,
             drag_start: None,
             pin: None,
@@ -439,6 +442,13 @@ impl PageHero {
         self
     }
 
+    /// Leaves the cover out, so the title and actions sit on the page's banner the way an
+    /// artist's page does on YouTube Music.
+    pub(crate) fn coverless(mut self, coverless: bool) -> Self {
+        self.coverless = coverless;
+        self
+    }
+
     pub(crate) fn explicit(mut self, explicit: bool) -> Self {
         self.explicit = explicit;
         self
@@ -468,20 +478,22 @@ impl RenderOnce for PageHero {
                 .items_end()
                 .gap(COVER_GAP)
                 .pb_6()
-                .child(
-                    Skeleton::new()
-                        .flex_none()
-                        .size(art)
-                        .rounded(theme.radius * 1.5)
-                        .when(self.circle, |skeleton| skeleton.rounded_full()),
-                )
+                .when(!self.coverless, |this| {
+                    this.child(
+                        Skeleton::new()
+                            .flex_none()
+                            .size(art)
+                            .rounded(theme.radius * 1.5)
+                            .when(self.circle, |skeleton| skeleton.rounded_full()),
+                    )
+                })
                 .child(
                     div()
                         .flex()
                         .flex_col()
                         .flex_1()
                         .min_w_0()
-                        .h(art)
+                        .when(!self.coverless, |this| this.h(art))
                         .justify_end()
                         .gap_2()
                         .line_height(relative(LEADING))
@@ -513,30 +525,32 @@ impl RenderOnce for PageHero {
             .items_end()
             .gap(COVER_GAP)
             .pb_6()
-            .child(
-                div()
-                    .flex_none()
-                    .when_some(starter, |this, drag_start: Rc<DragStart>| {
-                        this.on_mouse_down(MouseButton::Right, move |event, window, cx| {
-                            drag_start(event, window, cx)
+            .when(!self.coverless, |this| {
+                this.child(
+                    div()
+                        .flex_none()
+                        .when_some(starter, |this, drag_start: Rc<DragStart>| {
+                            this.on_mouse_down(MouseButton::Right, move |event, window, cx| {
+                                drag_start(event, window, cx)
+                            })
                         })
-                    })
-                    .child(
-                        Artwork::new(self.cover)
-                            .size(art)
-                            .corner_radius(theme.radius * 1.5)
-                            .when(self.circle, Artwork::circle)
-                            .when_some(self.fallback, Artwork::fallback)
-                            .when(self.accent, Artwork::accent),
-                    ),
-            )
+                        .child(
+                            Artwork::new(self.cover)
+                                .size(art)
+                                .corner_radius(theme.radius * 1.5)
+                                .when(self.circle, Artwork::circle)
+                                .when_some(self.fallback, Artwork::fallback)
+                                .when(self.accent, Artwork::accent),
+                        ),
+                )
+            })
             .child(
                 div()
                     .flex()
                     .flex_col()
                     .flex_1()
                     .min_w_0()
-                    .h(art)
+                    .when(!self.coverless, |this| this.h(art))
                     .justify_end()
                     .gap_2()
                     .line_height(relative(LEADING))
