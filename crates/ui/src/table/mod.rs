@@ -688,6 +688,8 @@ pub struct TableState<S: TableSource> {
     moving: Option<(usize, usize)>,
     sizing: Option<Sizing>,
     column_menu: Option<Point<Pixels>>,
+    /// A row picked out from elsewhere, scrolled to once the table knows where it stands.
+    revealing: Option<usize>,
 }
 
 impl<S: TableSource> EventEmitter<TableEvent> for TableState<S> {}
@@ -710,12 +712,25 @@ impl<S: TableSource> TableState<S> {
             moving: None,
             sizing: None,
             column_menu: None,
+            revealing: None,
         }
     }
 
     pub fn follow(mut self, scroll: ScrollHandle) -> Self {
         self.scroll = Some(scroll);
         self
+    }
+
+    /// Selects `row` alone and scrolls it to the middle of the view on the next frame the
+    /// table is laid out, for a link that opens a page on one of its items.
+    pub fn spotlight(&mut self, row: usize, cx: &mut Context<Self>) {
+        if row >= self.delegate.source.rows(cx) {
+            return;
+        }
+        self.delegate.marked.clear();
+        self.delegate.pick(row, false, false);
+        self.revealing = Some(row);
+        cx.notify();
     }
 
     pub fn set_viewport(&mut self, viewport: Viewport) {
@@ -815,6 +830,27 @@ impl<S: TableSource> TableState<S> {
 
         let offset = scroll.offset();
         scroll.set_offset(point(offset.x, offset.y - delta));
+    }
+
+    /// Scrolls so the row at `display` sits in the middle of the view, as far as the page can
+    /// scroll.
+    fn center(&self, display: usize, window: &Window, cx: &App) {
+        let Some(scroll) = &self.scroll else {
+            return;
+        };
+        let metrics = cx.theme().metrics;
+        let row = snapped(metrics.row, window);
+        let head = snapped(metrics.header, window);
+        let middle = head + row * display as f32 + row / 2.;
+        let delta = middle - (self.viewport.top + self.viewport.height / 2.);
+        let offset = scroll.offset();
+        let reach = scroll.max_offset().y;
+        let y = offset.y - delta;
+        let y = match reach > Pixels::ZERO {
+            true => y.max(-reach),
+            false => y,
+        };
+        scroll.set_offset(point(offset.x, y.min(Pixels::ZERO)));
     }
 
     fn height(&self, head: Pixels, row: Pixels, count: usize) -> Pixels {
@@ -1437,6 +1473,12 @@ fn sort_icon(direction: Option<Sort>) -> &'static str {
 impl<S: TableSource> Render for TableState<S> {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.delegate.measure(window, cx);
+        if self.viewport.height > Pixels::ZERO
+            && let Some(wanted) = self.revealing.take()
+            && let Some(display) = self.delegate.display_of(wanted)
+        {
+            self.center(display, window, cx);
+        }
 
         let metrics = cx.theme().metrics;
         let row = snapped(metrics.row, window);

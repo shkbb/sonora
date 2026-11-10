@@ -1272,8 +1272,19 @@ impl FullscreenView {
     }
 }
 
+/// Opens `album`, with the playing song picked out when it comes from there.
 fn open_album(album: &str, cx: &mut App) {
-    navigate(Destination::Album(album.into()), cx);
+    let destination = Destination::Album(album.into());
+    let playing = Sonora::global(cx)
+        .playback
+        .read(cx)
+        .shown_track(cx)
+        .filter(|track| track.album_id.as_deref() == Some(album))
+        .and_then(|track| track.id);
+    match playing {
+        Some(id) => router::reveal(destination, id.into(), cx),
+        None => navigate(destination, cx),
+    }
 }
 
 /// What a cover that opens the track's album is called: the album's name, or View album when

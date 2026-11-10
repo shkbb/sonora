@@ -6,6 +6,7 @@ use gpui::{
 };
 
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use i18n::t;
 use music::{Album, AlbumDetail, Playlist, ReleaseType, Track};
@@ -41,6 +42,10 @@ use crate::shared::tracks::{
 use crate::shared::{cells, page};
 
 const PINNED: [&str; 3] = ["cover", "title", "name"];
+
+/// How long after a page loads a song picked out by a link is picked out again, should the
+/// page redraw and drop the selection.
+const SPOTLIGHT_HOLD: Duration = Duration::from_secs(2);
 
 enum Saveable {
     Album(Album),
@@ -117,6 +122,10 @@ pub(crate) struct DetailView {
     rails: Vec<Rail>,
     /// Which list the recommendation rail shows.
     rail_tab: RailTab,
+    /// The page and the song a link asked to pick out, and when it asked. It is held while the
+    /// page loads and a little after, since a page opened from cache redraws once more and that
+    /// redraw drops the selection.
+    spotlight: Option<(String, SharedString, Instant)>,
 }
 
 impl DetailView {
@@ -196,6 +205,7 @@ impl DetailView {
             }
             this.retune(cx);
             this.rebuild(cx);
+            this.light(cx);
             cx.notify();
         })
         .detach();
@@ -290,9 +300,58 @@ impl DetailView {
             me: me.downgrade(),
             rails: Vec::new(),
             rail_tab: RailTab::Albums,
+            spotlight: None,
         };
         view.restore_filters(cx);
         view
+    }
+
+    /// Picks out the song `row` once `page` shows it, the way a song's title opens its album
+    /// with the song selected.
+    pub(crate) fn spotlight(&mut self, page: &str, row: SharedString, cx: &mut Context<Self>) {
+        self.spotlight = Some((page.to_owned(), row, Instant::now()));
+        self.light(cx);
+    }
+
+    /// Selects the asked-for song if the page holds it. The request is let go once the page
+    /// has loaded, or as soon as another page is on show.
+    fn light(&mut self, cx: &mut Context<Self>) {
+        let Some((page, row, asked)) = self.spotlight.clone() else {
+            return;
+        };
+        let detail = self.detail.read(cx);
+        if detail.id() != Some(page.as_str()) {
+            self.spotlight = None;
+            return;
+        }
+        // The hold runs from when the page stopped loading, so a slow page still gets it.
+        if detail.is_loading() {
+            self.spotlight = Some((page.clone(), row.clone(), Instant::now()));
+        } else if asked.elapsed() > SPOTLIGHT_HOLD {
+            self.spotlight = None;
+            return;
+        }
+        let tracks = detail.tracks();
+        // A music video playing in place of its song is not on the album, so its title finds
+        // the song instead.
+        let playing = self
+            .playback
+            .read(cx)
+            .shown_track(cx)
+            .filter(|track| track.id.as_deref() == Some(row.as_ref()));
+        let found = tracks
+            .iter()
+            .position(|track| track.id.as_deref() == Some(row.as_ref()))
+            .or_else(|| {
+                let playing = playing?;
+                tracks
+                    .iter()
+                    .position(|track| track.name.eq_ignore_ascii_case(&playing.name))
+            });
+        if let Some(found) = found {
+            self.table
+                .update(cx, |table, cx| table.spotlight(found, cx));
+        }
     }
 
     fn retune(&mut self, cx: &mut Context<Self>) {

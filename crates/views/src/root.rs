@@ -180,9 +180,18 @@ impl Root {
 
         let navigation = router::trail(cx);
 
-        cx.subscribe(&navigation, |this, _, event, cx| {
-            let NavigationEvent::Moved(destination) = event;
-            this.transition_to(destination.clone(), cx);
+        cx.subscribe(&navigation, |this, _, event, cx| match event {
+            NavigationEvent::Moved(destination) => this.transition_to(destination.clone(), cx),
+            NavigationEvent::Spotlight(destination, row) => {
+                let (view, page) = match destination {
+                    Destination::Album(id) => (this.screens.album.clone(), id),
+                    Destination::Playlist(id) => (this.screens.playlist.clone(), id),
+                    _ => return,
+                };
+                if let Some(view) = view {
+                    view.update(cx, |view, cx| view.spotlight(page, row.clone(), cx));
+                }
+            }
         })
         .detach();
 

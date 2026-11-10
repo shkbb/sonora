@@ -423,6 +423,12 @@ pub fn navigate(destination: Destination, cx: &mut App) {
     trail(cx).update(cx, |navigation, cx| navigation.go(destination, cx));
 }
 
+/// Goes to `destination` and picks out the row holding `row` there, the way a song's title
+/// opens its album with the song selected.
+pub fn reveal(destination: Destination, row: SharedString, cx: &mut App) {
+    trail(cx).update(cx, |navigation, cx| navigation.reveal(destination, row, cx));
+}
+
 /// Replaces the current destination so Back and Forward do not revisit a page that disappeared.
 pub fn replace(destination: Destination, cx: &mut App) {
     trail(cx).update(cx, |navigation, cx| navigation.replace(destination, cx));

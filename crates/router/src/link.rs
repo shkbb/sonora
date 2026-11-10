@@ -1,11 +1,13 @@
 use gpui::accesskit::Role;
 use gpui::prelude::*;
-use gpui::{Div, Stateful};
+use gpui::{Div, SharedString, Stateful};
 
-use crate::{Destination, navigate};
+use crate::{Destination, navigate, reveal};
 
 pub trait Link: Sized {
     fn link(self, to: Destination) -> Self;
+    /// A link that also picks out the row holding `row` on the page it opens.
+    fn link_row(self, to: Destination, row: SharedString) -> Self;
 }
 
 impl Link for Stateful<Div> {
@@ -17,6 +19,15 @@ impl Link for Stateful<Div> {
             .on_click(move |_, _, cx| {
                 cx.stop_propagation();
                 navigate(to.clone(), cx);
+            })
+    }
+
+    fn link_row(self, to: Destination, row: SharedString) -> Self {
+        self.role(Role::Link)
+            .cursor_pointer()
+            .on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                reveal(to.clone(), row.clone(), cx);
             })
     }
 }

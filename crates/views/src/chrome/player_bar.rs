@@ -321,7 +321,10 @@ impl PlayerBar {
             .when_some(track.and_then(|track| track.pin()), Pinnable::pin)
             .when_some(
                 track.and_then(|track| track.album_id.clone()),
-                |this, album| this.link(Destination::Album(album.into())),
+                |this, album| match track.and_then(|track| track.id.clone()) {
+                    Some(id) => this.link_row(Destination::Album(album.into()), id.into()),
+                    None => this.link(Destination::Album(album.into())),
+                },
             )
             .when_some(album, |this, album| this.aria_label(album))
             .when(track.is_some(), |this| {
@@ -354,7 +357,12 @@ impl PlayerBar {
                     Some(album_id) => this
                         .aria_label(SharedString::from(track.name.clone()))
                         .hover(|style| style.underline())
-                        .link(Destination::Album(album_id.into())),
+                        .map(|this| match track.id.clone() {
+                            Some(id) => {
+                                this.link_row(Destination::Album(album_id.into()), id.into())
+                            }
+                            None => this.link(Destination::Album(album_id.into())),
+                        }),
                     None => this
                         .role(Role::Label)
                         .aria_value(SharedString::from(track.name.clone())),

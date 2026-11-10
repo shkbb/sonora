@@ -454,10 +454,31 @@ impl TrackSource {
             track.name.clone(),
             color,
             track.explicit.then(|| t!("song-explicit")),
-            None,
+            self.album_tap(track, cx),
             download_mark(cell, track, cx),
             self.liked_button(cell, track, cx),
         )
+    }
+
+    /// What pressing a title does: open the track's album with the track picked out, unless
+    /// the table already is that album.
+    fn album_tap(&self, track: &Track, cx: &App) -> Option<cells::Tap> {
+        let album = track.album_id.clone()?;
+        let id = track.id.clone()?;
+        if self
+            .album
+            .as_ref()
+            .is_some_and(|detail| detail.read(cx).id() == Some(album.as_str()))
+        {
+            return None;
+        }
+        Some(Box::new(move |cx| {
+            router::reveal(
+                Destination::Album(album.clone().into()),
+                id.clone().into(),
+                cx,
+            )
+        }))
     }
 
     fn liked_button(&self, cell: &Cell<TrackField>, track: &Track, cx: &App) -> Option<AnyElement> {

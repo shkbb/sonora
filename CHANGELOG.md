@@ -22,6 +22,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the cover, lyrics and artist stay up through the switch.
 - The lyrics in Now playing slide up line by line, and opening the full lyrics from there gives
   you a way back.
+- Click a song's title in the player bar, in Now playing or in any song list to open its album
+  with the song picked out.
 
 ## [0.48.1] - 2026-11-08
 

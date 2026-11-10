@@ -396,11 +396,20 @@ impl ItemMenu {
         let album = match (many, columns.album, track.album_id.clone()) {
             (true, _, _) | (false, true, _) => None,
             (false, false, Some(id)) if Some(id.as_str()) == current_album => None,
-            (false, false, Some(id)) => Some(
-                MenuItem::new("go-to-album", t!("menu-go-to-album"))
-                    .icon("icons/disc-3.svg")
-                    .on_click(move |_, _, cx| navigate(Destination::Album(id.clone().into()), cx)),
-            ),
+            (false, false, Some(id)) => {
+                let song = track.id.clone();
+                Some(
+                    MenuItem::new("go-to-album", t!("menu-go-to-album"))
+                        .icon("icons/disc-3.svg")
+                        .on_click(move |_, _, cx| {
+                            let album = Destination::Album(id.clone().into());
+                            match song.clone() {
+                                Some(song) => router::reveal(album, song.into(), cx),
+                                None => navigate(album, cx),
+                            }
+                        }),
+                )
+            }
             (false, false, None) => Some(
                 MenuItem::new("go-to-album", t!("menu-go-to-album"))
                     .icon("icons/disc-3.svg")

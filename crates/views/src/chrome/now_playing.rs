@@ -16,7 +16,7 @@ use gpui::{
 };
 use i18n::t;
 use input::{ShowAudio, ShowVideo, ToggleFullscreen, ToggleLyrics};
-use router::{Destination, navigate};
+use router::{Destination, Link as _, navigate};
 use state::{AppSettings, Lyrics, Playback, PlaybackState, SongDetail, Sonora, Video, Viewer};
 use ui::{
     ActiveTheme as _, Artwork, Button, Motion, Motioned as _, Scrollbar, Scroller, Scrubber,
@@ -693,7 +693,30 @@ impl Render for NowPlaying {
                                             .flex_col()
                                             .flex_1()
                                             .min_w_0()
-                                            .child(heading(track.name.clone(), cx).truncate())
+                                            .child(
+                                                div()
+                                                    .id("now-playing-title")
+                                                    .min_w_0()
+                                                    .when_some(
+                                                        track
+                                                            .album_id
+                                                            .clone()
+                                                            .zip(track.id.clone()),
+                                                        |this, (album, id)| {
+                                                            this.aria_label(SharedString::from(
+                                                                track.name.clone(),
+                                                            ))
+                                                            .hover(|style| style.underline())
+                                                            .link_row(
+                                                                Destination::Album(album.into()),
+                                                                id.into(),
+                                                            )
+                                                        },
+                                                    )
+                                                    .child(
+                                                        heading(track.name.clone(), cx).truncate(),
+                                                    ),
+                                            )
                                             .child(
                                                 crate::shared::cells::artist_links(
                                                     "now-playing-artists",

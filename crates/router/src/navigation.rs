@@ -1,9 +1,11 @@
-use gpui::{Context, EventEmitter};
+use gpui::{Context, EventEmitter, SharedString};
 
 use crate::{Destination, SettingsPage};
 
 pub enum NavigationEvent {
     Moved(Destination),
+    /// The page should pick out the row holding this item, once it shows it.
+    Spotlight(Destination, SharedString),
 }
 
 pub struct Navigation {
@@ -51,6 +53,12 @@ impl Navigation {
             }
         }
         self.arrive(cx);
+    }
+
+    /// Goes to `destination`, or stays on it, and asks it to pick out the row holding `row`.
+    pub fn reveal(&mut self, destination: Destination, row: SharedString, cx: &mut Context<Self>) {
+        self.go(destination.clone(), cx);
+        cx.emit(NavigationEvent::Spotlight(destination, row));
     }
 
     pub fn back(&mut self, cx: &mut Context<Self>) {
