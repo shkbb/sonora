@@ -46,6 +46,13 @@ pub struct Video {
     viewers: u8,
     /// The track whose picture is loaded or being looked for.
     following: Option<String>,
+    /// The track followed itself, which becomes the other half once playback swaps to its pair.
+    followed: Option<Song>,
+    /// Whether a view shows the switch between a song and its video, so the other half is
+    /// kept ready for it.
+    attentive: bool,
+    /// The picture of the other half, opened ahead so a switch to it shows at once.
+    standby: Option<Standby>,
     /// Whether the track followed is a music video, `None` while that is being asked.
     kind: Option<bool>,
     /// The other half of the track followed, its music video or its song, once found.
@@ -56,6 +63,14 @@ pub struct Video {
     failed: bool,
     pipeline: Option<Pipeline>,
     opening: Option<Task<()>>,
+}
+
+/// The picture of a track that is not playing yet, opened ahead.
+struct Standby {
+    id: String,
+    /// The stream once it has opened. It reads nothing more until a pipeline takes it.
+    stream: Option<music::video::VideoStream>,
+    _opening: Task<()>,
 }
 
 /// A view that shows the picture. Each is a bit in [`Video::viewers`].
@@ -116,6 +131,9 @@ impl Video {
             io,
             viewers: 0,
             following: None,
+            followed: None,
+            attentive: false,
+            standby: None,
             kind: None,
             counterpart: None,
             pairing: None,
@@ -135,6 +153,74 @@ impl Video {
         };
         self.viewers = viewers;
         self.open(cx);
+    }
+
+    /// Says whether a view shows the switch between a song and its video. While one does, the
+    /// other half is kept ready: its sound fetched ahead and its picture opened, so the switch
+    /// is heard and seen at once.
+    pub fn attend(&mut self, attentive: bool, cx: &mut Context<Self>) {
+        if self.attentive == attentive {
+            return;
+        }
+        self.attentive = attentive;
+        match attentive {
+            true => self.ready(cx),
+            false => self.standby = None,
+        }
+    }
+
+    /// Gets the other half of the track followed ready for a switch to it.
+    fn ready(&mut self, cx: &mut Context<Self>) {
+        if !self.attentive {
+            return;
+        }
+        let (Some(other), Some(is_video)) = (self.counterpart.clone(), self.kind) else {
+            return;
+        };
+        self.playback
+            .update(cx, |playback, _| playback.preload(&other));
+        // Only a song's other half has a picture to open.
+        let Some(id) = other.id.filter(|_| !is_video) else {
+            return;
+        };
+        if self
+            .standby
+            .as_ref()
+            .is_some_and(|standby| standby.id == id)
+        {
+            return;
+        }
+        let Some(client) = self.session.read(cx).client() else {
+            return;
+        };
+        let opening = self.io.spawn({
+            let id = id.clone();
+            async move { client.open_video(&id).await }
+        });
+        let task = cx.spawn({
+            let id = id.clone();
+            async move |this, cx| {
+                let opened = join(opening).await;
+                this.update(cx, |this, _| {
+                    let Some(standby) = this.standby.as_mut().filter(|held| held.id == id) else {
+                        return;
+                    };
+                    match opened {
+                        Ok(stream) => standby.stream = stream,
+                        Err(error) => {
+                            log::debug!("video: cannot open {id} ahead: {error:#}");
+                            this.standby = None;
+                        }
+                    }
+                })
+                .ok();
+            }
+        });
+        self.standby = Some(Standby {
+            id,
+            stream: None,
+            _opening: task,
+        });
     }
 
     /// Whether the track playing is a music video, so it can be watched.
@@ -193,28 +279,56 @@ impl Video {
     /// track plays, so a view that hides and comes back shows it again at once.
     fn follow(&mut self, cx: &mut Context<Self>) {
         let playback = self.playback.read(cx);
-        let id = playback
+        let track = playback
             .track()
-            .and_then(|track| track.id.clone())
-            .filter(|id| !music::is_local_id(id));
+            .filter(|track| {
+                track
+                    .id
+                    .as_deref()
+                    .is_some_and(|id| !music::is_local_id(id))
+            })
+            .cloned();
         let stopped = matches!(
             playback.state(),
             PlaybackState::Idle | PlaybackState::Failed(_)
         );
-        let id = id.filter(|_| !stopped);
+        let track = track.filter(|_| !stopped);
+        let id = track.as_ref().and_then(|track| track.id.clone());
         if id != self.following {
+            // A swap to the other half needs nothing asked: what it is and what pairs with it
+            // are the reverse of what was known.
+            let swapped = match (&self.counterpart, self.kind, &id) {
+                (Some(other), Some(is_video), Some(id)) if other.id.as_ref() == Some(id) => {
+                    self.followed.take().map(|previous| (previous, !is_video))
+                }
+                _ => None,
+            };
             self.following = id.clone();
-            self.kind = None;
-            self.counterpart = None;
-            self.pairing = None;
+            self.followed = track;
             self.failed = false;
             self.pipeline = None;
             self.opening = None;
             self.checking = None;
-            cx.notify();
-            if let Some(id) = id {
-                self.check(id.clone(), cx);
-                self.pair(id, cx);
+            self.pairing = None;
+            self.standby
+                .take_if(|standby| Some(&standby.id) != id.as_ref());
+            match (swapped, id) {
+                (Some((previous, is_video)), Some(_)) => {
+                    self.kind = Some(is_video);
+                    self.counterpart = Some(previous);
+                    cx.notify();
+                    self.open(cx);
+                    self.ready(cx);
+                }
+                (_, id) => {
+                    self.kind = None;
+                    self.counterpart = None;
+                    cx.notify();
+                    if let Some(id) = id {
+                        self.check(id.clone(), cx);
+                        self.pair(id, cx);
+                    }
+                }
             }
             return;
         }
@@ -247,6 +361,7 @@ impl Video {
                     Err(error) => log::debug!("video: no other half of {id}: {error:#}"),
                 }
                 cx.notify();
+                this.ready(cx);
             })
             .ok();
         }));
@@ -274,6 +389,7 @@ impl Video {
                 }));
                 cx.notify();
                 this.open(cx);
+                this.ready(cx);
             })
             .ok();
         }));
@@ -289,6 +405,19 @@ impl Video {
         let Some(id) = self.following.clone() else {
             return;
         };
+        // A picture opened ahead starts at once.
+        let ahead = self
+            .standby
+            .take_if(|standby| standby.id == id && standby.stream.is_some())
+            .and_then(|standby| standby.stream);
+        if let Some(stream) = ahead {
+            let position = self.playback.read(cx).live_position();
+            let pipeline = Pipeline::start(stream, &self.io);
+            pipeline.to_worker.send(Feed::Seek(position)).ok();
+            self.pipeline = Some(pipeline);
+            cx.notify();
+            return;
+        }
         let Some(client) = self.session.read(cx).client() else {
             return;
         };
@@ -584,7 +713,7 @@ impl Worker {
     fn pace(&mut self) {
         if self.cursor.0 > BEHIND && self.cursor.0 <= self.fragments.len() {
             let gone = self.cursor.0 - BEHIND;
-            let cut = self.fragments[gone - 1].next;
+            let cut = self.fragments[gone - 1].next.min(self.data.len());
             self.data.drain(..cut);
             self.fragments.drain(..gone);
             for fragment in &mut self.fragments {
@@ -651,6 +780,10 @@ impl Worker {
             self.cursor = (fragment + 1, 0);
             return Ok(true);
         };
+        // A fragment is known from its header on, ahead of the pictures it names.
+        if coded.bytes.end > self.data.len() {
+            return Ok(false);
+        }
         let seconds = |ticks: u64| Duration::from_secs_f64(ticks as f64 / track.timescale as f64);
         let nal = fmp4::annex_b(track, coded, &self.data)?;
         let frames = decoder.push(

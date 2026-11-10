@@ -125,8 +125,9 @@ pub fn read_index(data: &[u8], at: usize) -> Result<Option<Vec<Segment>>> {
     Ok(Some(segments))
 }
 
-/// Reads the fragment whose `moof` starts at `at`. `None` while its `moof` or `mdat` has not
-/// fully arrived. Boxes between fragments, such as a `sidx`, are stepped over.
+/// Reads the fragment whose `moof` starts at `at`. `None` while its `moof` has not fully
+/// arrived. The samples it names may still be on their way: a caller checks each one's bytes
+/// against what it holds. Boxes between fragments, such as a `sidx`, are stepped over.
 pub fn read_fragment(data: &[u8], mut at: usize) -> Result<Option<Fragment>> {
     let (moof, end) = loop {
         let Some((kind, body, end)) = next_box(data, at) else {
@@ -138,15 +139,22 @@ pub fn read_fragment(data: &[u8], mut at: usize) -> Result<Option<Fragment>> {
         at = end;
     };
     let moof_start = at;
-    let Some((kind, _, next)) = next_box(data, end) else {
+    // The mdat need only have its header in: its samples are read as their bytes arrive, so
+    // the first picture of a segment does not wait for the whole segment.
+    let Some(header) = data.get(end..end + 8) else {
         return Ok(None);
     };
-    if &kind != b"mdat" {
+    if &header[4..8] != b"mdat" {
         bail!(
             "a fragment's moof is followed by {}",
-            String::from_utf8_lossy(&kind)
+            String::from_utf8_lossy(&header[4..8])
         );
     }
+    let size = u32::from_be_bytes(header[..4].try_into()?) as usize;
+    if size < 8 {
+        bail!("a fragment's mdat gives no size");
+    }
+    let next = end + size;
     let traf = path(&data[moof.clone()], &[b"traf"]).context("the fragment has no traf")?;
     let traf = &data[moof.start + traf.start..moof.start + traf.end];
     let samples = traf_samples(traf, moof_start)?;
